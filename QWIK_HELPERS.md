@@ -1,10 +1,10 @@
 # Qwik Server-Side Helper Functions
 
-These helper functions can be added to your hamrah-web project to simplify server-side API integration.
+These helper functions can be added to your hamrah-app project to simplify server-side API integration.
 
 ## Installation
 
-Create `src/lib/api-helpers.ts` in your hamrah-web project:
+Create `src/lib/api-helpers.ts` in your hamrah-app project:
 
 ```typescript
 // src/lib/api-helpers.ts
