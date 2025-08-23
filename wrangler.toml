@@ -1,6 +1,16 @@
 name = "hamrah-api"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-08-22"
+compatibility_flags = ["nodejs_compat"]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "prod-hamrah-app-auth"
+database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
+
+[vars]
+NODE_ENV = "production"
+INTERNAL_API_KEY = "hamrah-internal-service-key-2025"
