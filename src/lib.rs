@@ -3,17 +3,36 @@ mod db;
 mod handlers;
 
 use axum::{
-    routing::{get, post, put, delete},
+    routing::{get, post, put, delete, patch},
     Router,
     middleware,
     http::HeaderValue,
+    extract::FromRef,
 };
 use tower_service::Service;
 use tower_http::cors::{CorsLayer, Any};
 use worker::*;
 use db::{Database, migrations::{get_migrations, MigrationRunner}};
 
-fn app_router(db: Database, env: Env) -> Router {
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Database,
+    pub env: Env,
+}
+
+impl FromRef<AppState> for Database {
+    fn from_ref(state: &AppState) -> Database {
+        state.db.clone()
+    }
+}
+
+impl FromRef<AppState> for Env {
+    fn from_ref(state: &AppState) -> Env {
+        state.env.clone()
+    }
+}
+
+fn app_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/health", get(health_check))
@@ -38,6 +57,15 @@ fn app_router(db: Database, env: Env) -> Router {
         .route("/api/users/me", delete(handlers::users::delete_user_account))
         .route("/api/users/:user_id", get(handlers::users::get_user_by_id))
         
+        // WebAuthn endpoints
+        .route("/api/webauthn/register/begin", post(handlers::webauthn::begin_registration))
+        .route("/api/webauthn/register/complete", post(handlers::webauthn::complete_registration))
+        .route("/api/webauthn/authenticate/begin", post(handlers::webauthn::begin_authentication))
+        .route("/api/webauthn/authenticate/complete", post(handlers::webauthn::complete_authentication))
+        .route("/api/webauthn/credentials", get(handlers::webauthn::get_credentials))
+        .route("/api/webauthn/credentials/:credential_id", delete(handlers::webauthn::delete_credential))
+        .route("/api/webauthn/credentials/:credential_id", patch(handlers::webauthn::update_credential_name))
+        
         .layer(
             CorsLayer::new()
                 .allow_origin([
@@ -49,8 +77,7 @@ fn app_router(db: Database, env: Env) -> Router {
                 .allow_headers(Any)
                 .allow_credentials(true)
         )
-        .with_state(db)
-        .with_state(env)
+        .with_state(state)
 }
 
 #[event(fetch)]
@@ -70,7 +97,8 @@ async fn fetch(
     migration_runner.run_migrations(&migrations).await
         .map_err(|e| worker::Error::from(format!("Migration failed: {}", e)))?;
     
-    Ok(app_router(db, env).call(req).await?)
+    let state = AppState { db, env };
+    Ok(app_router(state).call(req).await?)
 }
 
 pub async fn root() -> &'static str {

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod users;
 pub mod internal;
+pub mod webauthn;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -57,5 +58,11 @@ impl From<worker::Error> for ApiError {
 impl From<crate::auth::AuthError> for ApiError {
     fn from(err: crate::auth::AuthError) -> Self {
         ApiError::AuthError(err)
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(err: sqlx::Error) -> Self {
+        ApiError::DatabaseError(err.to_string())
     }
 }
