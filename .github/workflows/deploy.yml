@@ -1,0 +1,125 @@
+name: Build and Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: rustfmt, clippy
+        target: wasm32-unknown-unknown
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install worker-build
+      run: cargo install worker-build
+
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Run tests
+      run: cargo test
+
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+
+    - name: Check formatting
+      run: cargo fmt --check
+
+    - name: Build Rust Worker
+      run: worker-build --release
+
+    - name: Set deployment variables
+      run: |
+        BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+        SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | tr '/' '-' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
+        COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+        
+        if [ "${{ github.event_name }}" = "push" ] && [ "$BRANCH_NAME" = "main" ]; then
+          echo "VERSION_TAG=production-${COMMIT_SHA}" >> $GITHUB_ENV
+          echo "VERSION_MESSAGE=Production deployment from main branch" >> $GITHUB_ENV
+          echo "SHOULD_DEPLOY=true" >> $GITHUB_ENV
+        elif [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "VERSION_TAG=pr-${{ github.event.number }}-${COMMIT_SHA}" >> $GITHUB_ENV
+          echo "VERSION_MESSAGE=PR #${{ github.event.number }}: ${{ github.event.pull_request.title }}" >> $GITHUB_ENV
+          echo "SHOULD_DEPLOY=false" >> $GITHUB_ENV
+          echo "PREVIEW_URL=https://hamrah-api-${SANITIZED_BRANCH}.hamrah.workers.dev" >> $GITHUB_ENV
+        else
+          echo "VERSION_TAG=branch-${SANITIZED_BRANCH}-${COMMIT_SHA}" >> $GITHUB_ENV  
+          echo "VERSION_MESSAGE=Branch deployment: ${BRANCH_NAME}" >> $GITHUB_ENV
+          echo "SHOULD_DEPLOY=false" >> $GITHUB_ENV
+          echo "PREVIEW_URL=https://hamrah-api-${SANITIZED_BRANCH}.hamrah.workers.dev" >> $GITHUB_ENV
+        fi
+
+    - name: Upload Worker Version
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        command: versions upload --message "${{ env.VERSION_MESSAGE }}" --tag "${{ env.VERSION_TAG }}"
+
+    - name: Deploy to Production
+      if: env.SHOULD_DEPLOY == 'true'
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        command: versions deploy --version-id ${{ env.VERSION_ID }} --percentage 100
+
+    - name: Create Branch Deployment
+      if: env.SHOULD_DEPLOY == 'false'
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        command: deploy --name hamrah-api-${{ github.head_ref || github.ref_name }}
+
+    - name: Comment PR with preview URL
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const branchName = '${{ github.head_ref }}';
+          const sanitizedBranch = branchName.replace(/[\/\_]/g, '-').toLowerCase();
+          const previewUrl = `https://hamrah-api-${sanitizedBranch}.hamrah.workers.dev`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 **Branch deployment ready!**
+            
+**Preview URL:** ${previewUrl}
+**Branch:** \`${branchName}\`
+**Version:** \`${{ env.VERSION_TAG }}\`
+**Commit:** ${context.sha.substring(0, 7)}
+
+This deployment will remain active as long as the branch exists.`
+          })
