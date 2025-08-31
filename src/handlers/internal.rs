@@ -1,6 +1,6 @@
 use super::{ApiError, ApiResult};
 use crate::auth::{session, tokens};
-use crate::db::{schema::User, Database};
+use crate::db::Database;
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;

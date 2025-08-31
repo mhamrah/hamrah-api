@@ -11,7 +11,6 @@ use sqlx_d1::{query, query_as};
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
-use crate::db::schema::User;
 use crate::{
     handlers::{ApiError, ApiResult},
     AppState,
@@ -63,7 +62,7 @@ pub struct UpdateCredentialNameRequest {
 
 // Initialize WebAuthn instance
 fn create_webauthn() -> Result<Webauthn, WebauthnError> {
-    let url = Url::parse("https://hamrah.app").map_err(|_| WebauthnError::InvalidRpId)?;
+    let url = Url::parse("https://hamrah.app").map_err(|_| WebauthnError::CorruptData)?;
     WebauthnBuilder::new("hamrah.app", &url)
         .unwrap()
         .rp_name("Hamrah")
