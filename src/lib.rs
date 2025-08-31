@@ -1,18 +1,21 @@
 mod auth;
 mod db;
 mod handlers;
+mod utils;
 
 use axum::{
-    routing::{get, post, put, delete, patch},
-    Router,
-    middleware,
-    http::HeaderValue,
     extract::FromRef,
+    http::HeaderValue,
+    routing::{delete, get, patch, post, put},
+    Router,
 };
+use db::{
+    migrations::{get_migrations, MigrationRunner},
+    Database,
+};
+use tower_http::cors::{Any, CorsLayer};
 use tower_service::Service;
-use tower_http::cors::{CorsLayer, Any};
 use worker::*;
-use db::{Database, migrations::{get_migrations, MigrationRunner}};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -36,36 +39,85 @@ fn app_router(state: AppState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/health", get(health_check))
-        
         // Internal service endpoints (service-to-service only)
-        .route("/api/internal/users", post(handlers::internal::create_user_internal))
-        .route("/api/internal/sessions", post(handlers::internal::create_session_internal))
-        .route("/api/internal/sessions/validate", post(handlers::internal::validate_session_internal))
-        .route("/api/internal/tokens", post(handlers::internal::create_tokens_internal))
-        
+        .route(
+            "/api/internal/users",
+            post(handlers::internal::create_user_internal),
+        )
+        .route(
+            "/api/internal/sessions",
+            post(handlers::internal::create_session_internal),
+        )
+        .route(
+            "/api/internal/sessions/validate",
+            post(handlers::internal::validate_session_internal),
+        )
+        .route(
+            "/api/internal/tokens",
+            post(handlers::internal::create_tokens_internal),
+        )
         // Public endpoints for client-side API access
-        .route("/api/auth/sessions/validate", get(handlers::auth::validate_session))
-        .route("/api/auth/sessions/logout", post(handlers::auth::logout_session))
-        .route("/api/auth/tokens/refresh", post(handlers::auth::refresh_token_endpoint))
-        .route("/api/auth/tokens/:token_id/revoke", delete(handlers::auth::revoke_token_endpoint))
-        .route("/api/auth/users/:user_id/tokens/revoke", delete(handlers::auth::revoke_all_user_tokens_endpoint))
-        
+        .route(
+            "/api/auth/sessions/validate",
+            get(handlers::auth::validate_session),
+        )
+        .route(
+            "/api/auth/sessions/logout",
+            post(handlers::auth::logout_session),
+        )
+        .route(
+            "/api/auth/tokens/refresh",
+            post(handlers::auth::refresh_token_endpoint),
+        )
+        .route(
+            "/api/auth/tokens/:token_id/revoke",
+            delete(handlers::auth::revoke_token_endpoint),
+        )
+        .route(
+            "/api/auth/users/:user_id/tokens/revoke",
+            delete(handlers::auth::revoke_all_user_tokens_endpoint),
+        )
         // User endpoints
         .route("/api/users/me", get(handlers::users::get_current_user))
         .route("/api/users/me", put(handlers::users::update_current_user))
-        .route("/api/users/me/tokens", get(handlers::users::get_user_tokens))
-        .route("/api/users/me", delete(handlers::users::delete_user_account))
+        .route(
+            "/api/users/me/tokens",
+            get(handlers::users::get_user_tokens),
+        )
+        .route(
+            "/api/users/me",
+            delete(handlers::users::delete_user_account),
+        )
         .route("/api/users/:user_id", get(handlers::users::get_user_by_id))
-        
         // WebAuthn endpoints
-        .route("/api/webauthn/register/begin", post(handlers::webauthn::begin_registration))
-        .route("/api/webauthn/register/complete", post(handlers::webauthn::complete_registration))
-        .route("/api/webauthn/authenticate/begin", post(handlers::webauthn::begin_authentication))
-        .route("/api/webauthn/authenticate/complete", post(handlers::webauthn::complete_authentication))
-        .route("/api/webauthn/credentials", get(handlers::webauthn::get_credentials))
-        .route("/api/webauthn/credentials/:credential_id", delete(handlers::webauthn::delete_credential))
-        .route("/api/webauthn/credentials/:credential_id", patch(handlers::webauthn::update_credential_name))
-        
+        .route(
+            "/api/webauthn/register/begin",
+            post(handlers::webauthn::begin_registration),
+        )
+        .route(
+            "/api/webauthn/register/complete",
+            post(handlers::webauthn::complete_registration),
+        )
+        .route(
+            "/api/webauthn/authenticate/begin",
+            post(handlers::webauthn::begin_authentication),
+        )
+        .route(
+            "/api/webauthn/authenticate/complete",
+            post(handlers::webauthn::complete_authentication),
+        )
+        .route(
+            "/api/webauthn/credentials",
+            get(handlers::webauthn::get_credentials),
+        )
+        .route(
+            "/api/webauthn/credentials/:credential_id",
+            delete(handlers::webauthn::delete_credential),
+        )
+        .route(
+            "/api/webauthn/credentials/:credential_id",
+            patch(handlers::webauthn::update_credential_name),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin([
@@ -75,7 +127,7 @@ fn app_router(state: AppState) -> Router {
                 ])
                 .allow_methods(Any)
                 .allow_headers(Any)
-                .allow_credentials(true)
+                .allow_credentials(true),
         )
         .with_state(state)
 }
@@ -87,16 +139,18 @@ async fn fetch(
     _ctx: Context,
 ) -> Result<axum::http::Response<axum::body::Body>> {
     console_error_panic_hook::set_once();
-    
+
     // Initialize database
-    let db = Database::new(&env).await?;
-    
+    let mut db = Database::new(&env).await?;
+
     // Run migrations
-    let migration_runner = MigrationRunner::new(&db);
+    let mut migration_runner = MigrationRunner::new(&mut db);
     let migrations = get_migrations();
-    migration_runner.run_migrations(&migrations).await
+    migration_runner
+        .run_migrations(&migrations)
+        .await
         .map_err(|e| worker::Error::from(format!("Migration failed: {}", e)))?;
-    
+
     let state = AppState { db, env };
     Ok(app_router(state).call(req).await?)
 }

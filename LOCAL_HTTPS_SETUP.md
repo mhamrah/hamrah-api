@@ -188,7 +188,6 @@ Or for external URL:
 
 Add to `hamrah-api/.dev.vars`:
 ```
-INTERNAL_API_KEY=hamrah-internal-dev-key
 NODE_ENV=development
 DATABASE_URL=sqlite:./dev.db
 ```
@@ -197,7 +196,6 @@ Add to `hamrah-app/.dev.vars`:
 ```
 GOOGLE_CLIENT_SECRET=your-google-secret
 APPLE_CERTIFICATE=your-apple-certificate
-INTERNAL_API_KEY=hamrah-internal-dev-key
 ```
 
 ## Testing HTTPS Locally
@@ -205,11 +203,11 @@ INTERNAL_API_KEY=hamrah-internal-dev-key
 Test that cookies work across domains:
 
 ```bash
-# Test service binding
+# Test service binding (authentication handled automatically by Cloudflare)
 curl -X POST https://your-tunnel-url.trycloudflare.com/api/internal/sessions \
   -H "Content-Type: application/json" \
-  -H "X-Internal-Service: hamrah-app" \
-  -H "X-Internal-Key: hamrah-internal-dev-key" \
+  -H "X-Service-Name: hamrah-app" \
+  -H "X-Request-ID: test-request-123" \
   -d '{"user_id":"test-user","platform":"web"}'
 
 # Test cookie setting from web app

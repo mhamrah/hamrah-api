@@ -1,10 +1,9 @@
-pub mod schema;
 pub mod migrations;
+pub mod schema;
 
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, ConnectOptions};
-use worker::Env;
+use sqlx_d1::D1Connection;
 use thiserror::Error;
-use std::str::FromStr;
+use worker::{Env, Error as WorkerError};
 
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -18,25 +17,14 @@ pub enum DbError {
 
 #[derive(Clone)]
 pub struct Database {
-    pub pool: SqlitePool,
+    pub conn: D1Connection,
 }
 
 impl Database {
-    pub async fn new(env: &Env) -> Result<Self, worker::Error> {
-        // For Cloudflare D1, we'll connect using the D1 HTTP API
-        // Note: This is a simplified approach - in production you might want to use D1 HTTP API directly
-        let database_url = env.var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite::memory:".to_string());
-            
-        let options = SqliteConnectOptions::from_str(&database_url)
-            .map_err(|e| worker::Error::from(format!("Invalid database URL: {}", e)))?
-            .create_if_missing(true);
-        
-        let pool = SqlitePool::connect_with(options)
-            .await
-            .map_err(|e| worker::Error::from(format!("Failed to connect to database: {}", e)))?;
-        
-        Ok(Self { pool })
+    pub async fn new(env: &Env) -> Result<Self, WorkerError> {
+        let d1 = env.d1("DB")?;
+        let conn = D1Connection::new(d1);
+        Ok(Self { conn })
     }
 }
 

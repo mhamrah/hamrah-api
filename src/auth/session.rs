@@ -1,14 +1,16 @@
-use super::AuthError;
-use crate::db::{Database, schema::{Session, NewSession, User}};
-use sha2::{Sha256, Digest};
-use base32::{Alphabet, encode};
-use uuid::Uuid;
-use chrono::{DateTime, Utc, Duration};
-use sqlx::Row;
+use crate::db::{
+    schema::{Session, User},
+    Database,
+};
+use crate::utils::datetime_to_timestamp;
+use base32::{encode, Alphabet};
+use chrono::{Duration, Utc};
+use sha2::{Digest, Sha256};
+use sqlx_d1::{query, query_as};
 
 pub fn generate_session_token() -> String {
     let bytes = uuid::Uuid::new_v4().as_bytes().to_vec();
-    encode(Alphabet::RFC4648 { padding: false }, &bytes).to_lowercase()
+    encode(Alphabet::Rfc4648 { padding: false }, &bytes).to_lowercase()
 }
 
 pub fn create_session_id(token: &str) -> String {
@@ -18,27 +20,23 @@ pub fn create_session_id(token: &str) -> String {
 }
 
 pub async fn create_session(
-    db: &Database, 
-    token: &str, 
-    user_id: &str
-) -> Result<Session, sqlx::Error> {
+    db: &mut Database,
+    token: &str,
+    user_id: &str,
+) -> Result<Session, worker::Error> {
     let session_id = create_session_id(token);
-    let now = Utc::now();
-    let expires_at = now + Duration::days(30); // 30 days
-    
-    let sql = r#"
-        INSERT INTO sessions (id, user_id, expires_at, created_at) 
-        VALUES (?, ?, ?, ?)
-    "#;
-    
-    sqlx::query(sql)
+    let now = datetime_to_timestamp(Utc::now());
+    let expires_at = datetime_to_timestamp(Utc::now() + Duration::days(30)); // 30 days
+
+    query("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
         .bind(&session_id)
         .bind(user_id)
         .bind(expires_at)
         .bind(now)
-        .execute(&db.pool)
-        .await?;
-    
+        .execute(&mut db.conn)
+        .await
+        .map_err(|e| worker::Error::from(format!("Database error: {}", e)))?;
+
     Ok(Session {
         id: session_id,
         user_id: user_id.to_string(),
@@ -47,90 +45,114 @@ pub async fn create_session(
     })
 }
 
+// DTO for session validation query result
+#[derive(sqlx::FromRow)]
+struct SessionUserRow {
+    // User fields
+    user_id: String,
+    email: String,
+    name: Option<String>,
+    picture: Option<String>,
+    email_verified: Option<i64>,
+    auth_method: Option<String>,
+    provider: Option<String>,
+    provider_id: Option<String>,
+    last_login_platform: Option<String>,
+    last_login_at: Option<i64>,
+    user_created_at: i64,
+    user_updated_at: i64,
+    // Session fields
+    session_id: String,
+    session_expires_at: i64,
+    session_created_at: i64,
+}
+
 pub async fn validate_session_token(
-    db: &Database, 
-    token: &str
-) -> Result<Option<(Session, User)>, sqlx::Error> {
+    db: &mut Database,
+    token: &str,
+) -> Result<Option<(Session, User)>, worker::Error> {
     let session_id = create_session_id(token);
-    
-    let sql = r#"
-        SELECT 
-            s.id, s.user_id, s.expires_at, s.created_at,
+
+    let result = query_as::<SessionUserRow>(
+        r#"
+        SELECT
             u.id as user_id, u.email, u.name, u.picture, u.email_verified,
             u.auth_method, u.provider, u.provider_id, u.last_login_platform,
-            u.last_login_at, u.created_at as user_created_at, u.updated_at
+            u.last_login_at, u.created_at as user_created_at, u.updated_at as user_updated_at,
+            s.id as session_id, s.expires_at as session_expires_at, s.created_at as session_created_at
         FROM sessions s
         INNER JOIN users u ON s.user_id = u.id
         WHERE s.id = ?
-    "#;
-    
-    let result = sqlx::query(sql)
-        .bind(&session_id)
-        .fetch_optional(&db.pool)
-        .await?;
-    
+        "#
+    )
+    .bind(&session_id)
+    .fetch_optional(&mut db.conn)
+    .await
+    .map_err(|e| worker::Error::from(format!("Database error: {}", e)))?;
+
     if let Some(row) = result {
-        let expires_at: DateTime<Utc> = row.get("expires_at");
-            
+        let now = datetime_to_timestamp(Utc::now());
+
         // Check if session is expired
-        if Utc::now() >= expires_at {
+        if now >= row.session_expires_at {
             // Delete expired session
             invalidate_session(db, &session_id).await?;
             return Ok(None);
         }
-        
+
         let session = Session {
-            id: row.get("id"),
-            user_id: row.get("user_id"),
-            expires_at,
-            created_at: row.get("created_at"),
+            id: row.session_id,
+            user_id: row.user_id.clone(),
+            expires_at: row.session_expires_at,
+            created_at: row.session_created_at,
         };
-        
+
         let user = User {
-            id: row.get("user_id"),
-            email: row.get("email"),
-            name: row.get("name"),
-            picture: row.get("picture"),
-            email_verified: row.get("email_verified"),
-            auth_method: row.get("auth_method"),
-            provider: row.get("provider"),
-            provider_id: row.get("provider_id"),
-            last_login_platform: row.get("last_login_platform"),
-            last_login_at: row.get("last_login_at"),
-            created_at: row.get("user_created_at"),
-            updated_at: row.get("updated_at"),
+            id: row.user_id,
+            email: row.email,
+            name: row.name,
+            picture: row.picture,
+            email_verified: row.email_verified,
+            auth_method: row.auth_method,
+            provider: row.provider,
+            provider_id: row.provider_id,
+            last_login_platform: row.last_login_platform,
+            last_login_at: row.last_login_at,
+            created_at: row.user_created_at,
+            updated_at: row.user_updated_at,
         };
-        
+
         // Extend session if it expires in less than 15 days
-        if expires_at - Utc::now() < Duration::days(15) {
+        let fifteen_days_from_now = datetime_to_timestamp(Utc::now() + Duration::days(15));
+        if row.session_expires_at < fifteen_days_from_now {
             extend_session(db, &session_id).await?;
         }
-        
+
         Ok(Some((session, user)))
     } else {
         Ok(None)
     }
 }
 
-pub async fn extend_session(db: &Database, session_id: &str) -> Result<(), sqlx::Error> {
-    let new_expires_at = Utc::now() + Duration::days(30);
-    
-    let sql = "UPDATE sessions SET expires_at = ? WHERE id = ?";
-    sqlx::query(sql)
+pub async fn extend_session(db: &mut Database, session_id: &str) -> Result<(), worker::Error> {
+    let new_expires_at = datetime_to_timestamp(Utc::now() + Duration::days(30));
+
+    query("UPDATE sessions SET expires_at = ? WHERE id = ?")
         .bind(new_expires_at)
         .bind(session_id)
-        .execute(&db.pool)
-        .await?;
-    
+        .execute(&mut db.conn)
+        .await
+        .map_err(|e| worker::Error::from(format!("Database error: {}", e)))?;
+
     Ok(())
 }
 
-pub async fn invalidate_session(db: &Database, session_id: &str) -> Result<(), sqlx::Error> {
-    let sql = "DELETE FROM sessions WHERE id = ?";
-    sqlx::query(sql)
+pub async fn invalidate_session(db: &mut Database, session_id: &str) -> Result<(), worker::Error> {
+    query("DELETE FROM sessions WHERE id = ?")
         .bind(session_id)
-        .execute(&db.pool)
-        .await?;
-    
+        .execute(&mut db.conn)
+        .await
+        .map_err(|e| worker::Error::from(format!("Database error: {}", e)))?;
+
     Ok(())
 }

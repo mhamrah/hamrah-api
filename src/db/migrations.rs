@@ -1,5 +1,5 @@
-use super::{Database, DbError};
-use sqlx::Row;
+use crate::db::Database;
+use sqlx_d1::query;
 
 pub trait Migration {
     fn up(&self) -> &'static str;
@@ -9,19 +9,22 @@ pub trait Migration {
 }
 
 pub struct MigrationRunner<'a> {
-    db: &'a Database,
+    db: &'a mut Database,
 }
 
 impl<'a> MigrationRunner<'a> {
-    pub fn new(db: &'a Database) -> Self {
+    pub fn new(db: &'a mut Database) -> Self {
         Self { db }
     }
 
-    pub async fn run_migrations(&self, migrations: &[&dyn Migration]) -> Result<(), sqlx::Error> {
+    pub async fn run_migrations(
+        &mut self,
+        migrations: &[&dyn Migration],
+    ) -> Result<(), sqlx::Error> {
         // Create migrations table if it doesn't exist
         self.ensure_migrations_table().await?;
 
-        for migration in migrations {
+        for &migration in migrations {
             if !self.is_migration_applied(migration.version()).await? {
                 self.apply_migration(migration).await?;
             }
@@ -29,49 +32,42 @@ impl<'a> MigrationRunner<'a> {
         Ok(())
     }
 
-    async fn ensure_migrations_table(&self) -> Result<(), sqlx::Error> {
-        let sql = r#"
+    async fn ensure_migrations_table(&mut self) -> Result<(), sqlx::Error> {
+        query(
+            r#"
             CREATE TABLE IF NOT EXISTS migrations (
                 version TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 applied_at INTEGER NOT NULL
             )
-        "#;
-        
-        sqlx::query(sql).execute(&self.db.pool).await?;
+        "#,
+        )
+        .execute(&mut self.db.conn)
+        .await?;
         Ok(())
     }
 
-    async fn is_migration_applied(&self, version: &str) -> Result<bool, sqlx::Error> {
-        let sql = "SELECT version FROM migrations WHERE version = ?";
-        let result = sqlx::query(sql)
+    async fn is_migration_applied(&mut self, version: &str) -> Result<bool, sqlx::Error> {
+        let result = query("SELECT version FROM migrations WHERE version = ?")
             .bind(version)
-            .fetch_optional(&self.db.pool)
+            .fetch_optional(&mut self.db.conn)
             .await?;
         Ok(result.is_some())
     }
 
-    async fn apply_migration(&self, migration: &dyn Migration) -> Result<(), sqlx::Error> {
-        // Begin transaction
-        let mut tx = self.db.pool.begin().await?;
-        
+    async fn apply_migration(&mut self, migration: &dyn Migration) -> Result<(), sqlx::Error> {
         // Run the migration
-        sqlx::query(migration.up()).execute(&mut *tx).await?;
-        
+        query(migration.up()).execute(&mut self.db.conn).await?;
+
         // Record that we applied it
-        let sql = "INSERT INTO migrations (version, name, applied_at) VALUES (?, ?, ?)";
         let now = chrono::Utc::now().timestamp_millis();
-        
-        sqlx::query(sql)
+        query("INSERT INTO migrations (version, name, applied_at) VALUES (?, ?, ?)")
             .bind(migration.version())
             .bind(migration.name())
             .bind(now)
-            .execute(&mut *tx)
+            .execute(&mut self.db.conn)
             .await?;
-            
-        // Commit transaction
-        tx.commit().await?;
-        
+
         Ok(())
     }
 }
