@@ -571,19 +571,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5c1b78ca4aae1ac06c48a526a655760685149f0d465d21f37abfe57ce075c6"
 
 [[package]]
-name = "futures-lite"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f78e10609fe0e0b3f4157ffab1876319b5b0db102a2c60dc4626306dc46b44ad"
-dependencies = [
- "fastrand",
- "futures-core",
- "futures-io",
- "parking",
- "pin-project-lite",
-]
-
-[[package]]
 name = "futures-macro"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1804,7 +1791,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6226ebb36a6752f156783d83c5fdeb30a776988dea54831f990261c6a75260de"
 dependencies = [
  "sqlx-d1-core",
- "sqlx-d1-macros",
 ]
 
 [[package]]
@@ -1821,26 +1807,6 @@ dependencies = [
  "sqlx-sqlite",
  "worker",
  "worker-sys",
-]
-
-[[package]]
-name = "sqlx-d1-macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "633e928e71c254c4c49bf0231c147a35f5351f7622a587da74df373b36b9b8bd"
-dependencies = [
- "futures-lite",
- "heck",
- "hex",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "sha2",
- "sqlx-core",
- "sqlx-d1-core",
- "sqlx-macros-core",
- "syn",
 ]
 
 [[package]]

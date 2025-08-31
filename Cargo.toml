@@ -42,5 +42,5 @@ sqlx = { version = "0.8", features = [
 webauthn-rs = { version = "0.5", features = [
     "danger-allow-state-serialisation",
 ] }
-sqlx-d1 = { version = "0.2.0", features = ["macros"] }
+sqlx-d1 = { version = "0.2.0" }
 base64 = "0.22"

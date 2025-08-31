@@ -59,10 +59,10 @@ pub async fn get_current_user_from_request(
                     .map_err(|e| ApiError::DatabaseError(e.to_string()))?
                 {
                     // Get user from token
-                    let user =
-                        query_as!(User, "SELECT * FROM users WHERE id = ?", auth_token.user_id)
-                            .fetch_one(&mut db.conn)
-                            .await?;
+                    let user = sqlx_d1::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+                        .bind(&auth_token.user_id)
+                        .fetch_one(&mut db.conn)
+                        .await?;
 
                     return Ok(user);
                 }
@@ -125,7 +125,7 @@ pub async fn update_current_user(
     let now = datetime_to_timestamp(Utc::now());
 
     // Update user fields
-    query!(
+    sqlx_d1::query(
         r#"
         UPDATE users
         SET name = CASE WHEN ? IS NOT NULL THEN ? ELSE name END,
@@ -133,18 +133,19 @@ pub async fn update_current_user(
             updated_at = ?
         WHERE id = ?
     "#,
-        request.name,
-        request.name,
-        request.picture,
-        request.picture,
-        now,
-        user.id
     )
+    .bind(&request.name)
+    .bind(&request.name)
+    .bind(&request.picture)
+    .bind(&request.picture)
+    .bind(&now)
+    .bind(&user.id)
     .execute(&mut db.conn)
     .await?;
 
     // Fetch updated user
-    let updated_user = query_as!(User, "SELECT * FROM users WHERE id = ?", user.id)
+    let updated_user = sqlx_d1::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(&user.id)
         .fetch_one(&mut db.conn)
         .await?;
 
@@ -194,7 +195,8 @@ pub async fn delete_user_account(
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     // Delete user (cascading deletes will handle sessions, tokens, etc.)
-    query!("DELETE FROM users WHERE id = ?", user.id)
+    sqlx_d1::query("DELETE FROM users WHERE id = ?")
+        .bind(&user.id)
         .execute(&mut db.conn)
         .await?;
 

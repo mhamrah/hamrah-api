@@ -12,6 +12,7 @@ use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
 use crate::{
+    db::schema::User,
     handlers::{ApiError, ApiResult},
     AppState,
 };
@@ -62,7 +63,7 @@ pub struct UpdateCredentialNameRequest {
 
 // Initialize WebAuthn instance
 fn create_webauthn() -> Result<Webauthn, WebauthnError> {
-    let url = Url::parse("https://hamrah.app").map_err(|_| WebauthnError::CorruptData)?;
+    let url = Url::parse("https://hamrah.app").map_err(|_| WebauthnError::Unknown)?;
     WebauthnBuilder::new("hamrah.app", &url)
         .unwrap()
         .rp_name("Hamrah")
