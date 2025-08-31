@@ -9,11 +9,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: false
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: 1
 
 jobs:
-  build-and-deploy:
+  test:
     runs-on: ubuntu-latest
-    
+    outputs:
+      cache-key: ${{ steps.cache.outputs.cache-hit }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -23,16 +27,13 @@ jobs:
       with:
         components: rustfmt, clippy
         target: wasm32-unknown-unknown
+        cache: false
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.5
 
-    - name: Install worker-build
-      run: cargo install worker-build
-
-    - name: Cache cargo dependencies
+    - name: Enhanced cargo cache
+      id: cache
       uses: actions/cache@v4
       with:
         path: |
@@ -41,21 +42,75 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          ~/.cache/sccache/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
           ${{ runner.os }}-cargo-
+
+    - name: Install worker-build
+      run: |
+        if ! command -v worker-build &> /dev/null; then
+          cargo install worker-build --locked
+        fi
 
     - name: Run tests
       run: cargo test
+      env:
+        RUSTC_WRAPPER: sccache
 
     - name: Run clippy
       run: cargo clippy -- -D warnings
+      env:
+        RUSTC_WRAPPER: sccache
 
     - name: Check formatting
       run: cargo fmt --check
 
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        target: wasm32-unknown-unknown
+        cache: false
+
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.5
+
+    - name: Restore cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+          ~/.cache/sccache/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Install worker-build
+      run: |
+        if ! command -v worker-build &> /dev/null; then
+          cargo install worker-build --locked
+        fi
+
     - name: Build Rust Worker
       run: worker-build --release
+      env:
+        RUSTC_WRAPPER: sccache
+        CARGO_PROFILE_RELEASE_LTO: thin
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
     - name: Set deployment variables
       run: |
