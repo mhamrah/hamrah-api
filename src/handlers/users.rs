@@ -11,7 +11,7 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx_d1::{query, query_as};
+use sqlx::{query, query_as};
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
@@ -59,7 +59,7 @@ pub async fn get_current_user_from_request(
                     .map_err(|e| ApiError::DatabaseError(e.to_string()))?
                 {
                     // Get user from token
-                    let user = sqlx_d1::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+                    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?")
                         .bind(&auth_token.user_id)
                         .fetch_one(&mut db.conn)
                         .await?;
@@ -144,7 +144,7 @@ pub async fn update_current_user(
     .await?;
 
     // Fetch updated user
-    let updated_user = sqlx_d1::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+    let updated_user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?")
         .bind(&user.id)
         .fetch_one(&mut db.conn)
         .await?;
@@ -168,7 +168,7 @@ pub async fn get_user_tokens(
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     let now = datetime_to_timestamp(Utc::now());
-    let results = query_as!(
+    let results = sqlx::query_as!(
         UserTokenInfo,
         r#"
         SELECT id, platform, user_agent, last_used, created_at, access_expires_at

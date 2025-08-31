@@ -5,7 +5,7 @@ use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx_d1::{query, query_as};
+use sqlx::{query, query_as};
 use uuid::Uuid;
 use worker::{console_log, Env};
 
@@ -136,7 +136,7 @@ pub async fn create_user_internal(
     let now = Utc::now();
 
     // Check if user already exists
-    let existing = query!("SELECT id FROM users WHERE email = ?", request.email)
+    let existing = sqlx::query!("SELECT id FROM users WHERE email = ?", request.email)
         .fetch_optional(&mut db.conn)
         .await?;
 
@@ -145,7 +145,7 @@ pub async fn create_user_internal(
     }
 
     // Create new user
-    query!(
+    sqlx::query!(
         r#"
         INSERT INTO users (
             id, email, name, picture, email_verified, auth_method,
@@ -205,7 +205,7 @@ pub async fn create_session_internal(
         .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     // Get user details
-    let user = query_as!(User, "SELECT * FROM users WHERE id = ?", request.user_id)
+    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?", request.user_id)
         .fetch_optional(&mut db.conn)
         .await?;
 
@@ -253,7 +253,7 @@ pub async fn create_tokens_internal(
     .await?;
 
     // Find or create user first
-    let user = query_as!(User, "SELECT * FROM users WHERE email = ?", request.email)
+    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE email = ?", request.email)
         .fetch_optional(&mut db.conn)
         .await?;
 
@@ -264,7 +264,7 @@ pub async fn create_tokens_internal(
         let new_user_id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        query!(
+        sqlx::query!(
             r#"
             INSERT INTO users (
                 id, email, name, picture, email_verified, auth_method,
@@ -303,7 +303,7 @@ pub async fn create_tokens_internal(
     .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     // Get updated user
-    let user = query_as!(User, "SELECT * FROM users WHERE id = ?", &user_id)
+    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?", &user_id)
         .fetch_one(&mut db.conn)
         .await?;
 

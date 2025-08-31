@@ -7,7 +7,7 @@ use base64::prelude::*;
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx_d1::{query, query_as};
+use sqlx::{query, query_as};
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
@@ -62,12 +62,13 @@ pub struct UpdateCredentialNameRequest {
 }
 
 // Initialize WebAuthn instance
-fn create_webauthn() -> Result<Webauthn, WebauthnError> {
-    let url = Url::parse("https://hamrah.app").map_err(|_| WebauthnError::Unknown)?;
-    WebauthnBuilder::new("hamrah.app", &url)
-        .unwrap()
+fn create_webauthn() -> ApiResult<Webauthn> {
+    let url = Url::parse("https://hamrah.app").map_err(|err| ApiError::ValidationError(err.to_string()))?;
+    Ok(WebauthnBuilder::new("hamrah.app", &url)
+        .map_err(|e| ApiError::InternalServerError(format!("WebAuthn initialization failed: {:?}", e)))?
         .rp_name("Hamrah")
         .build()
+        .map_err(|e| ApiError::InternalServerError(format!("WebAuthn build failed: {:?}", e)))?)
 }
 
 /// POST /api/webauthn/register/begin
@@ -84,14 +85,14 @@ pub async fn begin_registration(
     }
 
     let webauthn = create_webauthn().map_err(|e| {
-        ApiError::InternalServerError(format!("WebAuthn initialization failed: {}", e))
+        ApiError::InternalServerError(format!("WebAuthn initialization failed: {:?}", e))
     })?;
 
     // Check if user already exists
-    let existing_user = query_as!(User, "SELECT * FROM users WHERE email = ?", payload.email)
+    let existing_user = sqlx::query_as!(User, "SELECT * FROM users WHERE email = ?", payload.email)
         .fetch_optional(&mut state.db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(format!("Database error: {}", e)))?;
+        .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
 
     if existing_user.is_some() {
         return Err(ApiError::ValidationError(
@@ -102,11 +103,11 @@ pub async fn begin_registration(
     // Create user for WebAuthn registration
     let user_id = Uuid::new_v4().to_string();
     let user_uuid = Uuid::parse_str(&user_id)
-        .map_err(|e| ApiError::InternalServerError(format!("UUID parse error: {}", e)))?;
+        .map_err(|e| ApiError::InternalServerError(format!("UUID parse error: {:?}", e)))?;
 
     let (ccr, reg_state) = webauthn
         .start_passkey_registration(user_uuid, &payload.email, &payload.name, None)
-        .map_err(|e| ApiError::InternalServerError(format!("Registration start failed: {}", e)))?;
+        .map_err(|e| ApiError::InternalServerError(format!("Registration start failed: {:?}", e)))?;
 
     // Store challenge
     let challenge_id = Uuid::new_v4().to_string();
@@ -114,10 +115,9 @@ pub async fn begin_registration(
 
     // Serialize registration state
     let reg_state_json = serde_json::to_string(&reg_state)
-        .map_err(|e| ApiError::InternalServerError(format!("State serialization failed: {}", e)))?;
+        .map_err(|e| ApiError::InternalServerError(format!("State serialization failed: {:?}", e)))?;
 
-    query!(
-        "INSERT INTO webauthn_challenges (id, challenge, user_id, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    sqlx::query!("INSERT INTO webauthn_challenges (id, challenge, user_id, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         challenge_id,
         reg_state_json,
         user_id,
@@ -127,7 +127,7 @@ pub async fn begin_registration(
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to store challenge: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to store challenge: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true,
@@ -151,18 +151,18 @@ pub async fn complete_registration(
     Json(payload): Json<CompleteRegistrationRequest>,
 ) -> ApiResult<Json<Value>> {
     let webauthn = create_webauthn().map_err(|e| {
-        ApiError::InternalServerError(format!("WebAuthn initialization failed: {}", e))
+        ApiError::InternalServerError(format!("WebAuthn initialization failed: {:?}", e))
     })?;
 
     // Get and validate challenge
-    let challenge_row = query_as!(
+    let challenge_row = sqlx::query_as!(
         crate::db::schema::WebAuthnChallenge,
         "SELECT id, challenge, user_id, type as challenge_type, expires_at, created_at FROM webauthn_challenges WHERE id = ? AND type = 'registration'",
         payload.challenge_id
     )
     .fetch_optional(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Database error: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
 
     let challenge_row = challenge_row.ok_or(ApiError::ValidationError(
         "Invalid challenge ID".to_string(),
@@ -175,14 +175,14 @@ pub async fn complete_registration(
     // Deserialize registration state
     let reg_state: PasskeyRegistration =
         serde_json::from_str(&challenge_row.challenge).map_err(|e| {
-            ApiError::InternalServerError(format!("State deserialization failed: {}", e))
+            ApiError::InternalServerError(format!("State deserialization failed: {:?}", e))
         })?;
 
     // Verify registration
     let sk = webauthn
         .finish_passkey_registration(&payload.response, &reg_state)
         .map_err(|e| {
-            ApiError::ValidationError(format!("Registration verification failed: {}", e))
+            ApiError::ValidationError(format!("Registration verification failed: {:?}", e))
         })?;
 
     // Create user
@@ -191,7 +191,7 @@ pub async fn complete_registration(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = datetime_to_timestamp(Utc::now());
 
-    query!(
+    sqlx::query!(
         "INSERT INTO users (id, email, name, email_verified, auth_method, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         user_id,
         payload.email,
@@ -203,14 +203,14 @@ pub async fn complete_registration(
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to create user: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to create user: {:?}", e)))?;
 
     // Store credential
     let cred_id = base64::prelude::BASE64_STANDARD.encode(&sk.cred_id());
     // For now, store a placeholder for public key since the API doesn't expose it directly
     let public_key = base64::prelude::BASE64_STANDARD.encode(&sk.cred_id());
 
-    query!(
+    sqlx::query!(
         "INSERT INTO webauthn_credentials (id, user_id, public_key, counter, credential_type, user_verified, credential_backed_up, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         cred_id,
         user_id,
@@ -223,22 +223,22 @@ pub async fn complete_registration(
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to store credential: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to store credential: {:?}", e)))?;
 
     // Clean up challenge
-    query!(
+    sqlx::query!(
         "DELETE FROM webauthn_challenges WHERE id = ?",
         payload.challenge_id
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to clean up challenge: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to clean up challenge: {:?}", e)))?;
 
     // Create session using internal endpoint pattern
-    let user = query_as!(User, "SELECT * FROM users WHERE id = ?", user_id)
+    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?", user_id)
         .fetch_one(&mut state.db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch created user: {}", e)))?;
+        .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch created user: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true,
@@ -254,13 +254,13 @@ pub async fn begin_authentication(
     Json(_payload): Json<BeginAuthenticationRequest>,
 ) -> ApiResult<Json<Value>> {
     let webauthn = create_webauthn().map_err(|e| {
-        ApiError::InternalServerError(format!("WebAuthn initialization failed: {}", e))
+        ApiError::InternalServerError(format!("WebAuthn initialization failed: {:?}", e))
     })?;
 
     // The current version of webauthn-rs doesn't accept credential filters for passkeys
     // So we'll start with empty credentials and let it discover resident keys
     let (rcr, auth_state) = webauthn.start_passkey_authentication(&[]).map_err(|e| {
-        ApiError::InternalServerError(format!("Authentication start failed: {}", e))
+        ApiError::InternalServerError(format!("Authentication start failed: {:?}", e))
     })?;
 
     // Store challenge
@@ -268,9 +268,9 @@ pub async fn begin_authentication(
     let expires_at = datetime_to_timestamp(Utc::now() + Duration::minutes(5));
 
     let auth_state_json = serde_json::to_string(&auth_state)
-        .map_err(|e| ApiError::InternalServerError(format!("State serialization failed: {}", e)))?;
+        .map_err(|e| ApiError::InternalServerError(format!("State serialization failed: {:?}", e)))?;
 
-    query!(
+    sqlx::query!(
         "INSERT INTO webauthn_challenges (id, challenge, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
         challenge_id,
         auth_state_json,
@@ -280,7 +280,7 @@ pub async fn begin_authentication(
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to store challenge: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to store challenge: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true,
@@ -302,18 +302,18 @@ pub async fn complete_authentication(
     Json(payload): Json<CompleteAuthenticationRequest>,
 ) -> ApiResult<Json<Value>> {
     let webauthn = create_webauthn().map_err(|e| {
-        ApiError::InternalServerError(format!("WebAuthn initialization failed: {}", e))
+        ApiError::InternalServerError(format!("WebAuthn initialization failed: {:?}", e))
     })?;
 
     // Get and validate challenge
-    let challenge_row = query_as!(
+    let challenge_row = sqlx::query_as!(
         crate::db::schema::WebAuthnChallenge,
         "SELECT id, challenge, user_id, type as challenge_type, expires_at, created_at FROM webauthn_challenges WHERE id = ? AND type = 'authentication'",
         payload.challenge_id
     )
     .fetch_optional(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Database error: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
 
     let challenge_row = challenge_row.ok_or(ApiError::ValidationError(
         "Invalid challenge ID".to_string(),
@@ -326,18 +326,18 @@ pub async fn complete_authentication(
     // Deserialize authentication state
     let auth_state: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| {
-            ApiError::InternalServerError(format!("State deserialization failed: {}", e))
+            ApiError::InternalServerError(format!("State deserialization failed: {:?}", e))
         })?;
 
     // Get credential from database
     let cred_id_b64 = base64::prelude::BASE64_STANDARD.encode(&payload.response.raw_id);
-    let stored_cred = query!(
+    let stored_cred = sqlx::query!(
         "SELECT * FROM webauthn_credentials WHERE id = ?",
         cred_id_b64
     )
     .fetch_optional(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Database error: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
 
     let stored_cred = stored_cred.ok_or(ApiError::ValidationError(
         "Credential not found".to_string(),
@@ -347,37 +347,37 @@ pub async fn complete_authentication(
     let _auth_result = webauthn
         .finish_passkey_authentication(&payload.response, &auth_state)
         .map_err(|e| {
-            ApiError::ValidationError(format!("Authentication verification failed: {}", e))
+            ApiError::ValidationError(format!("Authentication verification failed: {:?}", e))
         })?;
 
     // Update credential last used (counter is managed by webauthn-rs)
-    query!(
+    sqlx::query!(
         "UPDATE webauthn_credentials SET last_used = ? WHERE id = ?",
         datetime_to_timestamp(Utc::now()),
         cred_id_b64
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential: {:?}", e)))?;
 
     // Clean up challenge
-    query!(
+    sqlx::query!(
         "DELETE FROM webauthn_challenges WHERE id = ?",
         payload.challenge_id
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to clean up challenge: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to clean up challenge: {:?}", e)))?;
 
     // Get user
-    let user = query_as!(
+    let user = sqlx::query_as!(
         User,
         "SELECT * FROM users WHERE id = ?",
         stored_cred.user_id
     )
     .fetch_one(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch user: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch user: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true,
@@ -397,18 +397,18 @@ pub async fn get_credentials(
     let user = get_current_user_from_request(&mut state.db, &headers).await?;
 
     // Query credentials for this user
-    let creds = sqlx_d1::query!(
+    let creds = sqlx::query!(
         "SELECT id, name, created_at, last_used FROM webauthn_credentials WHERE user_id = ?",
         user.id
     )
     .fetch_all(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch credentials: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to fetch credentials: {:?}", e)))?;
 
     let credentials: Vec<CredentialResponse> = creds
         .into_iter()
         .map(|row| CredentialResponse {
-            id: row.id,
+            id: row.id.expect("Credential ID should not be null"),
             name: row.name,
             created_at: crate::utils::timestamp_to_datetime(row.created_at).to_rfc3339(),
             last_used: row
@@ -429,13 +429,13 @@ pub async fn delete_credential(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
 ) -> ApiResult<Json<Value>> {
-    query!(
+    sqlx::query!(
         "DELETE FROM webauthn_credentials WHERE id = ?",
         credential_id
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to delete credential: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to delete credential: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true
@@ -449,14 +449,14 @@ pub async fn update_credential_name(
     Path(credential_id): Path<String>,
     Json(payload): Json<UpdateCredentialNameRequest>,
 ) -> ApiResult<Json<Value>> {
-    query!(
+    sqlx::query!(
         "UPDATE webauthn_credentials SET name = ? WHERE id = ?",
         payload.name,
         credential_id
     )
     .execute(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential name: {}", e)))?;
+    .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential name: {:?}", e)))?;
 
     Ok(Json(json!({
         "success": true
