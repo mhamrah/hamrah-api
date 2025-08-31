@@ -134,26 +134,29 @@ jobs:
         fi
 
     - name: Upload Worker Version
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@2.0.0
       with:
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        wranglerVersion: '3.90.0'
         command: versions upload --message "${{ env.VERSION_MESSAGE }}" --tag "${{ env.VERSION_TAG }}"
 
     - name: Deploy to Production
       if: env.SHOULD_DEPLOY == 'true'
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@2.0.0
       with:
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        wranglerVersion: '3.90.0'
         command: versions deploy --version-id ${{ env.VERSION_ID }} --percentage 100
 
     - name: Create Branch Deployment
       if: env.SHOULD_DEPLOY == 'false'
-      uses: cloudflare/wrangler-action@v3
+      uses: cloudflare/wrangler-action@2.0.0
       with:
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        wranglerVersion: '3.90.0'
         command: deploy --name hamrah-api-${{ github.head_ref || github.ref_name }}
 
     - name: Comment PR with preview URL
