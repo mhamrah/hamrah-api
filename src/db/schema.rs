@@ -1,4 +1,10 @@
 use serde::{Deserialize, Serialize};
+
+// Conditional imports for SQLx FromRow trait
+#[cfg(not(target_arch = "wasm32"))]
+use sqlx::FromRow;
+
+#[cfg(target_arch = "wasm32")]
 use sqlx::FromRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

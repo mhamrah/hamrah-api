@@ -8,6 +8,13 @@ use chrono::{Duration, Utc};
 use sha2::{Digest, Sha256};
 use sqlx_d1::{query, query_as};
 
+// Conditional imports for FromRow trait
+#[cfg(not(target_arch = "wasm32"))]
+use sqlx::FromRow;
+
+#[cfg(target_arch = "wasm32")]
+use sqlx_d1::FromRow;
+
 pub fn generate_session_token() -> String {
     let bytes = uuid::Uuid::new_v4().as_bytes().to_vec();
     encode(Alphabet::Rfc4648 { padding: false }, &bytes).to_lowercase()
@@ -46,7 +53,7 @@ pub async fn create_session(
 }
 
 // DTO for session validation query result
-#[derive(sqlx::FromRow)]
+#[derive(FromRow)]
 struct SessionUserRow {
     // User fields
     user_id: String,

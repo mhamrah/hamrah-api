@@ -1,10 +1,11 @@
+pub mod cookies;
 pub mod session;
 pub mod tokens;
-pub mod cookies;
 
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)] // Library enum - variants may be used by external consumers
 pub enum AuthError {
     #[error("Invalid credentials")]
     InvalidCredentials,
@@ -22,6 +23,9 @@ pub enum AuthError {
 
 pub type Platform = String;
 
+#[allow(dead_code)] // Library constants - may be used by external consumers
 pub const PLATFORM_WEB: &str = "web";
+#[allow(dead_code)]
 pub const PLATFORM_IOS: &str = "ios";
+#[allow(dead_code)]
 pub const PLATFORM_API: &str = "api";

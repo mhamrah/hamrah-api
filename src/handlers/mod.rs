@@ -1,6 +1,6 @@
 pub mod auth;
-pub mod users;
 pub mod internal;
+pub mod users;
 pub mod webauthn;
 
 use axum::http::StatusCode;
@@ -26,12 +26,24 @@ impl IntoResponse for ApiError {
         let (status, message) = match self {
             ApiError::DatabaseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             ApiError::AuthError(err) => match err {
-                crate::auth::AuthError::InvalidCredentials => (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()),
-                crate::auth::AuthError::SessionExpired => (StatusCode::UNAUTHORIZED, "Session expired".to_string()),
-                crate::auth::AuthError::TokenExpired => (StatusCode::UNAUTHORIZED, "Token expired".to_string()),
-                crate::auth::AuthError::InvalidToken => (StatusCode::UNAUTHORIZED, "Invalid token".to_string()),
-                crate::auth::AuthError::UserNotFound => (StatusCode::NOT_FOUND, "User not found".to_string()),
-                crate::auth::AuthError::DatabaseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                crate::auth::AuthError::InvalidCredentials => {
+                    (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string())
+                }
+                crate::auth::AuthError::SessionExpired => {
+                    (StatusCode::UNAUTHORIZED, "Session expired".to_string())
+                }
+                crate::auth::AuthError::TokenExpired => {
+                    (StatusCode::UNAUTHORIZED, "Token expired".to_string())
+                }
+                crate::auth::AuthError::InvalidToken => {
+                    (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
+                }
+                crate::auth::AuthError::UserNotFound => {
+                    (StatusCode::NOT_FOUND, "User not found".to_string())
+                }
+                crate::auth::AuthError::DatabaseError(msg) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                }
             },
             ApiError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "Resource not found".to_string()),
@@ -61,8 +73,17 @@ impl From<crate::auth::AuthError> for ApiError {
     }
 }
 
+// Conditional error conversions for SQLx types
+#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::Error> for ApiError {
     fn from(err: sqlx::Error) -> Self {
+        ApiError::DatabaseError(err.to_string())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<sqlx_d1::Error> for ApiError {
+    fn from(err: sqlx_d1::Error) -> Self {
         ApiError::DatabaseError(err.to_string())
     }
 }

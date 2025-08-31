@@ -9,15 +9,17 @@ pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> i64 {
 /// Converts a Unix timestamp in milliseconds to DateTime<Utc>
 /// Returns current time if the timestamp is invalid
 pub fn timestamp_to_datetime(ts: i64) -> DateTime<Utc> {
-    DateTime::from_timestamp_millis(ts).unwrap_or_else(|| Utc::now())
+    DateTime::from_timestamp_millis(ts).unwrap_or_else(Utc::now)
 }
 
 /// Converts an optional DateTime<Utc> to optional timestamp
+#[allow(dead_code)] // Library utility function
 pub fn optional_datetime_to_timestamp(dt: Option<DateTime<Utc>>) -> Option<i64> {
     dt.map(datetime_to_timestamp)
 }
 
 /// Converts an optional timestamp to optional DateTime<Utc>
+#[allow(dead_code)] // Library utility function
 pub fn optional_timestamp_to_datetime(ts: Option<i64>) -> Option<DateTime<Utc>> {
     ts.map(timestamp_to_datetime)
 }
@@ -30,6 +32,7 @@ pub struct TimestampField {
 }
 
 impl TimestampField {
+    #[allow(dead_code)] // Library utility function
     pub fn new(dt: DateTime<Utc>) -> Self {
         Self {
             timestamp: datetime_to_timestamp(dt),
@@ -37,6 +40,7 @@ impl TimestampField {
         }
     }
 
+    #[allow(dead_code)] // Library utility function
     pub fn from_timestamp(ts: i64) -> Self {
         let dt = timestamp_to_datetime(ts);
         Self {
@@ -47,21 +51,43 @@ impl TimestampField {
 }
 
 /// Validates email format (basic validation)
+#[allow(dead_code)] // Library utility function
 pub fn is_valid_email(email: &str) -> bool {
-    email.contains('@') && email.len() > 3 && email.len() < 255
+    if email.len() <= 3 || email.len() >= 255 {
+        return false;
+    }
+
+    let at_count = email.matches('@').count();
+    if at_count != 1 {
+        return false;
+    }
+
+    let parts: Vec<&str> = email.split('@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    let local = parts[0];
+    let domain = parts[1];
+
+    // Check that both local and domain parts are not empty
+    !local.is_empty() && !domain.is_empty() && domain.contains('.')
 }
 
 /// Validates UUID format
+#[allow(dead_code)] // Library utility function
 pub fn is_valid_uuid(uuid_str: &str) -> bool {
     uuid::Uuid::parse_str(uuid_str).is_ok()
 }
 
 /// Generates a secure random string using UUID
+#[allow(dead_code)] // Library utility function
 pub fn generate_secure_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
 /// Helper to convert boolean to integer for D1 storage
+#[allow(dead_code)] // Library utility function
 pub fn bool_to_int(value: bool) -> i64 {
     if value {
         1
@@ -71,6 +97,7 @@ pub fn bool_to_int(value: bool) -> i64 {
 }
 
 /// Helper to convert integer from D1 to boolean
+#[allow(dead_code)] // Library utility function
 pub fn int_to_bool(value: i64) -> bool {
     value != 0
 }

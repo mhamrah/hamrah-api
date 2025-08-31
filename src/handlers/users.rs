@@ -11,7 +11,14 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as};
+use sqlx_d1::query_as;
+
+// Conditional imports for FromRow trait
+#[cfg(not(target_arch = "wasm32"))]
+use sqlx::FromRow;
+
+#[cfg(target_arch = "wasm32")]
+use sqlx_d1::FromRow;
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
@@ -25,7 +32,7 @@ pub struct UserTokensResponse {
     pub tokens: Vec<UserTokenInfo>,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct UserTokenInfo {
     pub id: String,
     pub platform: String,
@@ -59,10 +66,11 @@ pub async fn get_current_user_from_request(
                     .map_err(|e| ApiError::DatabaseError(e.to_string()))?
                 {
                     // Get user from token
-                    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?")
+                    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
                         .bind(&auth_token.user_id)
                         .fetch_one(&mut db.conn)
-                        .await?;
+                        .await
+                        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
                     return Ok(user);
                 }
@@ -138,16 +146,17 @@ pub async fn update_current_user(
     .bind(&request.name)
     .bind(&request.picture)
     .bind(&request.picture)
-    .bind(&now)
+    .bind(now)
     .bind(&user.id)
     .execute(&mut db.conn)
     .await?;
 
     // Fetch updated user
-    let updated_user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?")
+    let updated_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
         .bind(&user.id)
         .fetch_one(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     let user_response = UserResponse {
         id: updated_user.id,
@@ -168,19 +177,19 @@ pub async fn get_user_tokens(
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     let now = datetime_to_timestamp(Utc::now());
-    let results = sqlx::query_as!(
-        UserTokenInfo,
+    let results = query_as::<UserTokenInfo>(
         r#"
         SELECT id, platform, user_agent, last_used, created_at, access_expires_at
         FROM auth_tokens
         WHERE user_id = ? AND revoked = 0 AND access_expires_at > ?
         ORDER BY last_used DESC, created_at DESC
-    "#,
-        user.id,
-        now
+        "#,
     )
+    .bind(&user.id)
+    .bind(now)
     .fetch_all(&mut db.conn)
-    .await?;
+    .await
+    .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     Ok(Json(UserTokensResponse {
         success: true,

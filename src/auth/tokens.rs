@@ -7,10 +7,18 @@ use sqlx_d1::{query, query_as};
 use uuid::Uuid;
 use worker::Result;
 
+// Conditional imports for FromRow trait
+#[cfg(not(target_arch = "wasm32"))]
+use sqlx::FromRow;
+
+#[cfg(target_arch = "wasm32")]
+use sqlx_d1::FromRow;
+
 pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
-    pub access_expires_at: i64,  // Unix timestamp in milliseconds
+    pub access_expires_at: i64, // Unix timestamp in milliseconds
+    #[allow(dead_code)] // May be used by external consumers for token management
     pub refresh_expires_at: i64, // Unix timestamp in milliseconds
 }
 
@@ -59,7 +67,7 @@ pub async fn create_token_pair(
     .bind(datetime_to_timestamp(access_expires_at))
     .bind(datetime_to_timestamp(refresh_expires_at))
     .bind(platform.as_str())
-    .bind(user_agent.as_deref())
+    .bind(user_agent)
     .bind(ip_address.unwrap_or(""))
     .bind(0)
     .bind(None::<i64>)
@@ -76,7 +84,7 @@ pub async fn create_token_pair(
     })
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(FromRow)]
 struct AuthTokenRow {
     id: String,
     user_id: String,
@@ -137,7 +145,7 @@ pub async fn validate_access_token(db: &mut Database, token: &str) -> Result<Opt
     }
 }
 
-#[derive(sqlx::FromRow)]
+#[derive(FromRow)]
 struct RefreshTokenRow {
     id: String,
     user_id: String,
@@ -208,6 +216,7 @@ pub async fn revoke_all_user_tokens(db: &mut Database, user_id: &str) -> Result<
     Ok(())
 }
 
+#[allow(dead_code)] // Library function for token usage tracking
 pub async fn update_token_last_used(db: &mut Database, token_id: &str) -> Result<()> {
     let now = datetime_to_timestamp(Utc::now());
     query("UPDATE auth_tokens SET last_used = ? WHERE id = ?")
@@ -220,6 +229,7 @@ pub async fn update_token_last_used(db: &mut Database, token_id: &str) -> Result
     Ok(())
 }
 
+#[allow(dead_code)] // Library function for token cleanup maintenance
 pub async fn cleanup_expired_tokens(db: &mut Database) -> Result<()> {
     let now = datetime_to_timestamp(Utc::now());
 

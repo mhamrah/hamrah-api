@@ -5,7 +5,7 @@ use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as};
+use sqlx_d1::{query, query_as};
 use uuid::Uuid;
 use worker::{console_log, Env};
 
@@ -25,6 +25,7 @@ pub struct CreateUserRequest {
 #[derive(Debug, Deserialize)]
 pub struct SessionRequest {
     pub user_id: String,
+    #[allow(dead_code)] // May be used in future platform-specific logic
     pub platform: String,
 }
 
@@ -136,38 +137,41 @@ pub async fn create_user_internal(
     let now = Utc::now();
 
     // Check if user already exists
-    let existing = sqlx::query!("SELECT id FROM users WHERE email = ?", request.email)
+    let existing = query("SELECT id FROM users WHERE email = ?")
+        .bind(&request.email)
         .fetch_optional(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     if existing.is_some() {
         return Err(ApiError::ValidationError("User already exists".to_string()));
     }
 
     // Create new user
-    sqlx::query!(
+    query(
         r#"
         INSERT INTO users (
             id, email, name, picture, email_verified, auth_method,
             provider, provider_id, last_login_platform, last_login_at,
             created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    "#,
-        user_id,
-        request.email,
-        request.name,
-        request.picture,
-        datetime_to_timestamp(now), // email_verified
-        request.auth_method,
-        request.provider,
-        request.provider_id,
-        request.platform,
-        datetime_to_timestamp(now), // last_login_at
-        datetime_to_timestamp(now), // created_at
-        datetime_to_timestamp(now), // updated_at
+        "#,
     )
+    .bind(&user_id)
+    .bind(&request.email)
+    .bind(&request.name)
+    .bind(&request.picture)
+    .bind(datetime_to_timestamp(now)) // email_verified
+    .bind(&request.auth_method)
+    .bind(&request.provider)
+    .bind(&request.provider_id)
+    .bind(&request.platform)
+    .bind(datetime_to_timestamp(now)) // last_login_at
+    .bind(datetime_to_timestamp(now)) // created_at
+    .bind(datetime_to_timestamp(now)) // updated_at
     .execute(&mut db.conn)
-    .await?;
+    .await
+    .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     let user_response = UserResponse {
         id: user_id,
@@ -205,9 +209,11 @@ pub async fn create_session_internal(
         .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     // Get user details
-    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?", request.user_id)
+    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
+        .bind(&request.user_id)
         .fetch_optional(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     if let Some(user) = user {
         let user_response = UserResponse {
@@ -253,9 +259,11 @@ pub async fn create_tokens_internal(
     .await?;
 
     // Find or create user first
-    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE email = ?", request.email)
+    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
+        .bind(&request.email)
         .fetch_optional(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     let user_id = if let Some(user) = user {
         user.id
@@ -264,29 +272,30 @@ pub async fn create_tokens_internal(
         let new_user_id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        sqlx::query!(
+        query(
             r#"
             INSERT INTO users (
                 id, email, name, picture, email_verified, auth_method,
                 provider, provider_id, last_login_platform, last_login_at,
                 created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-            new_user_id,
-            request.email,
-            request.name,
-            request.picture,
-            datetime_to_timestamp(now),
-            request.auth_method,
-            request.provider,
-            request.provider_id,
-            request.platform,
-            datetime_to_timestamp(now),
-            datetime_to_timestamp(now),
-            datetime_to_timestamp(now),
+            "#,
         )
+        .bind(&new_user_id)
+        .bind(&request.email)
+        .bind(&request.name)
+        .bind(&request.picture)
+        .bind(datetime_to_timestamp(now))
+        .bind(&request.auth_method)
+        .bind(&request.provider)
+        .bind(&request.provider_id)
+        .bind(&request.platform)
+        .bind(datetime_to_timestamp(now))
+        .bind(datetime_to_timestamp(now))
+        .bind(datetime_to_timestamp(now))
         .execute(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
         new_user_id
     };
@@ -303,9 +312,11 @@ pub async fn create_tokens_internal(
     .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     // Get updated user
-    let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = ?", &user_id)
+    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
+        .bind(&user_id)
         .fetch_one(&mut db.conn)
-        .await?;
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     let user_response = UserResponse {
         id: user.id,

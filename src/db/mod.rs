@@ -6,6 +6,7 @@ use thiserror::Error;
 use worker::{Env, Error as WorkerError};
 
 #[derive(Error, Debug)]
+#[allow(dead_code)] // Library error type - may be used by external consumers
 pub enum DbError {
     #[error("Database operation failed: {0}")]
     OperationFailed(String),
@@ -28,6 +29,8 @@ impl Database {
     }
 }
 
+// Conditional implementations for different SQLx types
+#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::Error> for DbError {
     fn from(err: sqlx::Error) -> Self {
         match err {
@@ -43,5 +46,13 @@ impl From<sqlx::Error> for DbError {
             }
             _ => DbError::OperationFailed(err.to_string()),
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl From<sqlx_d1::Error> for DbError {
+    fn from(err: sqlx_d1::Error) -> Self {
+        // Map sqlx-d1 errors to our DbError type
+        DbError::OperationFailed(err.to_string())
     }
 }

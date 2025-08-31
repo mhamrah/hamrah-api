@@ -26,6 +26,7 @@ impl Default for CookieOptions {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Cookie utility enum - all variants may be used
 pub enum SameSite {
     Strict,
     Lax,
@@ -42,6 +43,7 @@ impl std::fmt::Display for SameSite {
     }
 }
 
+#[allow(dead_code)] // Library function for session cookie management
 pub fn set_session_cookie(
     headers: &mut HeaderMap,
     name: &str,
@@ -50,7 +52,7 @@ pub fn set_session_cookie(
     is_secure: bool,
 ) {
     let domain = get_cookie_domain_from_request(headers);
-    
+
     let options = CookieOptions {
         http_only: true,
         secure: is_secure,
@@ -59,13 +61,13 @@ pub fn set_session_cookie(
         domain,
         ..Default::default()
     };
-    
+
     set_cookie(headers, name, value, options);
 }
 
 pub fn delete_session_cookie(headers: &mut HeaderMap, name: &str, is_secure: bool) {
     let domain = get_cookie_domain_from_request(headers);
-    
+
     let options = CookieOptions {
         http_only: true,
         secure: is_secure,
@@ -74,36 +76,39 @@ pub fn delete_session_cookie(headers: &mut HeaderMap, name: &str, is_secure: boo
         domain,
         ..Default::default()
     };
-    
+
     set_cookie(headers, name, "", options);
 }
 
 pub fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, options: CookieOptions) {
     let mut cookie = format!("{}={}", name, value);
-    
+
     if options.http_only {
         cookie.push_str("; HttpOnly");
     }
-    
+
     if options.secure {
         cookie.push_str("; Secure");
     }
-    
+
     cookie.push_str(&format!("; SameSite={}", options.same_site));
     cookie.push_str(&format!("; Path={}", options.path));
-    
+
     if let Some(domain) = &options.domain {
         cookie.push_str(&format!("; Domain={}", domain));
     }
-    
+
     if let Some(max_age) = options.max_age {
         cookie.push_str(&format!("; Max-Age={}", max_age));
     }
-    
+
     if let Some(expires) = options.expires {
-        cookie.push_str(&format!("; Expires={}", expires.format("%a, %d %b %Y %H:%M:%S GMT")));
+        cookie.push_str(&format!(
+            "; Expires={}",
+            expires.format("%a, %d %b %Y %H:%M:%S GMT")
+        ));
     }
-    
+
     if let Ok(header_value) = HeaderValue::from_str(&cookie) {
         headers.append("Set-Cookie", header_value);
     }
@@ -112,7 +117,7 @@ pub fn set_cookie(headers: &mut HeaderMap, name: &str, value: &str, options: Coo
 pub fn get_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get("cookie")?;
     let cookie_str = cookie_header.to_str().ok()?;
-    
+
     for cookie in cookie_str.split(';') {
         let cookie = cookie.trim();
         if let Some((cookie_name, cookie_value)) = cookie.split_once('=') {
@@ -121,16 +126,17 @@ pub fn get_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
 fn get_cookie_domain_from_request(headers: &HeaderMap) -> Option<String> {
     // Check the Origin or Referer header to determine the appropriate domain
-    let origin = headers.get("origin")
+    let origin = headers
+        .get("origin")
         .or_else(|| headers.get("referer"))
         .and_then(|h| h.to_str().ok())?;
-    
+
     if origin.contains("hamrah.app") {
         // Production: share cookies across hamrah.app subdomains
         Some(".hamrah.app".to_string())

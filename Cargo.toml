@@ -15,7 +15,6 @@ worker = { version = "0.6", features = ['http', 'axum', 'd1'] }
 worker-macros = { version = "0.6", features = ['http'] }
 axum = { version = "0.8", default-features = false, features = [
     "json",
-    "tokio",
     "http1",
     "query",
     "matched-path",
@@ -24,22 +23,38 @@ tower-service = "0.3.3"
 console_error_panic_hook = { version = "0.1.7" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+# Moved uuid to target-specific sections to control randomness features
 chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 base32 = "0.5"
 hex = "0.4"
-rand = "0.8"
+# Moved rand to target-specific sections to control getrandom features
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 thiserror = "1.0"
+# SQLx is only needed for non-WASM targets (development/testing)
+# Production WASM builds use sqlx-d1 directly
+# SQLx and WebAuthn are only available for non-WASM targets
+# SQLx: pulls in tempfile->getrandom without "js" feature 
+# WebAuthn: depends on OpenSSL which doesn't compile for WASM
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sqlx = { version = "0.8", features = [
-    "runtime-tokio-rustls",
     "chrono",
     "uuid",
 ] }
 webauthn-rs = { version = "0.5", features = [
     "danger-allow-state-serialisation",
 ] }
-sqlx-d1 = { version = "0.2.0" }
+rand = { version = "0.8", features = ["getrandom"] }
+getrandom = { version = "0.2.16" }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+sqlx-d1 = { version = "0.2.0", features = ["macros"] }
+base64 = "0.22"
+# WASM-specific dependencies with proper features
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rand = { version = "0.8", features = ["getrandom"], default-features = false }
+getrandom = { version = "0.2.16", features = ["js"] }
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+sqlx = { version = "0.8", features = ["derive", "macros"], default-features = false }
+sqlx-d1 = { version = "0.2.0", features = ["macros"] }
 base64 = "0.22"

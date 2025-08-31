@@ -1,8 +1,16 @@
 use crate::db::Database;
 use sqlx_d1::query;
 
+// Type alias for SQL error that works across targets
+#[cfg(not(target_arch = "wasm32"))]
+type SqlError = sqlx::Error;
+
+#[cfg(target_arch = "wasm32")]
+type SqlError = sqlx_d1::Error;
+
 pub trait Migration {
     fn up(&self) -> &'static str;
+    #[allow(dead_code)] // May be used for migration rollbacks in the future
     fn down(&self) -> &'static str;
     fn version(&self) -> &'static str;
     fn name(&self) -> &'static str;
@@ -17,10 +25,7 @@ impl<'a> MigrationRunner<'a> {
         Self { db }
     }
 
-    pub async fn run_migrations(
-        &mut self,
-        migrations: &[&dyn Migration],
-    ) -> Result<(), sqlx::Error> {
+    pub async fn run_migrations(&mut self, migrations: &[&dyn Migration]) -> Result<(), SqlError> {
         // Create migrations table if it doesn't exist
         self.ensure_migrations_table().await?;
 
@@ -32,7 +37,7 @@ impl<'a> MigrationRunner<'a> {
         Ok(())
     }
 
-    async fn ensure_migrations_table(&mut self) -> Result<(), sqlx::Error> {
+    async fn ensure_migrations_table(&mut self) -> Result<(), SqlError> {
         query(
             r#"
             CREATE TABLE IF NOT EXISTS migrations (
@@ -47,7 +52,7 @@ impl<'a> MigrationRunner<'a> {
         Ok(())
     }
 
-    async fn is_migration_applied(&mut self, version: &str) -> Result<bool, sqlx::Error> {
+    async fn is_migration_applied(&mut self, version: &str) -> Result<bool, SqlError> {
         let result = query("SELECT version FROM migrations WHERE version = ?")
             .bind(version)
             .fetch_optional(&mut self.db.conn)
@@ -55,7 +60,7 @@ impl<'a> MigrationRunner<'a> {
         Ok(result.is_some())
     }
 
-    async fn apply_migration(&mut self, migration: &dyn Migration) -> Result<(), sqlx::Error> {
+    async fn apply_migration(&mut self, migration: &dyn Migration) -> Result<(), SqlError> {
         // Run the migration
         query(migration.up()).execute(&mut self.db.conn).await?;
 
