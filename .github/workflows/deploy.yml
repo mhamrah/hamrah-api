@@ -116,10 +116,10 @@ jobs:
             repo: context.repo.repo,
             body: `🚀 **Branch deployment ready!**
             
-**Preview URL:** ${previewUrl}
-**Branch:** \`${branchName}\`
-**Version:** \`${{ env.VERSION_TAG }}\`
-**Commit:** ${context.sha.substring(0, 7)}
-
-This deployment will remain active as long as the branch exists.`
+            **Preview URL:** ${previewUrl}
+            **Branch:** \`${branchName}\`
+            **Version:** \`${{ env.VERSION_TAG }}\`
+            **Commit:** ${context.sha.substring(0, 7)}
+            
+            This deployment will remain active as long as the branch exists.`
           })
