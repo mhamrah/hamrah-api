@@ -1,11 +1,7 @@
 use crate::db::Database;
 use sqlx_d1::query;
 
-// Type alias for SQL error that works across targets
-#[cfg(not(target_arch = "wasm32"))]
-type SqlError = sqlx::Error;
-
-#[cfg(target_arch = "wasm32")]
+// Use D1 error type for WASM
 type SqlError = sqlx_d1::Error;
 
 pub trait Migration {

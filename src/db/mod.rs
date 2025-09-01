@@ -29,27 +29,7 @@ impl Database {
     }
 }
 
-// Conditional implementations for different SQLx types
-#[cfg(not(target_arch = "wasm32"))]
-impl From<sqlx::Error> for DbError {
-    fn from(err: sqlx::Error) -> Self {
-        match err {
-            sqlx::Error::RowNotFound => DbError::NotFound,
-            sqlx::Error::Database(db_err) => {
-                if db_err.is_unique_violation() {
-                    DbError::ConstraintViolation("Unique constraint violation".to_string())
-                } else if db_err.is_foreign_key_violation() {
-                    DbError::ConstraintViolation("Foreign key violation".to_string())
-                } else {
-                    DbError::OperationFailed(db_err.to_string())
-                }
-            }
-            _ => DbError::OperationFailed(err.to_string()),
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
+// D1 error conversion for WASM
 impl From<sqlx_d1::Error> for DbError {
     fn from(err: sqlx_d1::Error) -> Self {
         // Map sqlx-d1 errors to our DbError type

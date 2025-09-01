@@ -1,7 +1,7 @@
 pub mod auth;
 pub mod internal;
 pub mod users;
-pub mod webauthn;
+pub mod webauthn_data;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -73,15 +73,7 @@ impl From<crate::auth::AuthError> for ApiError {
     }
 }
 
-// Conditional error conversions for SQLx types
-#[cfg(not(target_arch = "wasm32"))]
-impl From<sqlx::Error> for ApiError {
-    fn from(err: sqlx::Error) -> Self {
-        ApiError::DatabaseError(err.to_string())
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
+// Error conversion for D1 SQLx
 impl From<sqlx_d1::Error> for ApiError {
     fn from(err: sqlx_d1::Error) -> Self {
         ApiError::DatabaseError(err.to_string())

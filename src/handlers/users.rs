@@ -11,14 +11,7 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx_d1::query_as;
-
-// Conditional imports for FromRow trait
-#[cfg(not(target_arch = "wasm32"))]
-use sqlx::FromRow;
-
-#[cfg(target_arch = "wasm32")]
-use sqlx_d1::FromRow;
+use sqlx_d1::{query_as, FromRow};
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
