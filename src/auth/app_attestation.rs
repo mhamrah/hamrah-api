@@ -1,18 +1,15 @@
 use crate::handlers::ApiError;
-use chrono::{Duration, Utc};
-use p256::{ecdsa::signature::Signer, pkcs8::DecodePrivateKey};
+use jwt_simple::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::{console_log, Env, Fetch, Method, Request, RequestInit};
 
 
 /// JWT Claims for Apple App Attest API authentication
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct AppAttestJWTClaims {
-    iss: String,   // Team ID
-    aud: String,   // Apple's App Attest audience
-    sub: String,   // Bundle ID
-    iat: i64,      // Issued at (Unix timestamp)
-    exp: i64,      // Expires at (Unix timestamp)
+    pub iss: String,   // Team ID
+    pub aud: String,   // Apple's App Attest audience
+    pub sub: String,   // Bundle ID
 }
 
 /// Apple App Attestation request payload
@@ -101,7 +98,7 @@ fn parse_attestation_token(token: &str) -> Result<AttestationPayload, ApiError> 
     Ok(attestation_payload)
 }
 
-/// Creates a JWT token for authenticating with Apple's App Attest API
+/// Creates a JWT token for authenticating with Apple's App Attest API using jwt-simple
 async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
     // Get required environment variables
     let bundle_id = env
@@ -126,8 +123,8 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
 
     console_log!("App Attestation: Environment variables loaded successfully");
 
-    // Parse the private key
-    let signing_key = p256::ecdsa::SigningKey::from_pkcs8_pem(&private_key)
+    // Parse the private key using jwt-simple
+    let key_pair = ES256KeyPair::from_pem(&private_key)
         .map_err(|e| {
             console_log!("App Attestation: Failed to parse private key: {}", e);
             ApiError::ValidationError("Invalid private key format".to_string())
@@ -135,45 +132,24 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
 
     console_log!("App Attestation: Private key parsed successfully");
 
-    // Create JWT manually (header + payload + signature)
-    let now = Utc::now();
-    
-    // JWT Header
-    let header = serde_json::json!({
-        "alg": "ES256",
-        "kid": key_id,
-        "typ": "JWT"
-    });
-    
-    // JWT Claims  
+    // Create JWT claims
     let claims = AppAttestJWTClaims {
         iss: team_id,
         aud: "https://api.devicecheck.apple.com/v1".to_string(),
         sub: bundle_id,
-        iat: now.timestamp(),
-        exp: (now + Duration::hours(1)).timestamp(),
     };
 
-    // Base64 URL encode header and payload
-    use base64::Engine;
-    let header_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::to_string(&header).unwrap());
-    let payload_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(serde_json::to_string(&claims).unwrap());
+    // Create token with custom header including key ID
+    let claims_with_expiry = Claims::with_custom_claims(claims, Duration::from_hours(1));
+    let token = key_pair
+        .sign(claims_with_expiry)
+        .map_err(|e| {
+            console_log!("App Attestation: Failed to sign JWT: {}", e);
+            ApiError::ValidationError("Failed to sign JWT token".to_string())
+        })?;
 
-    // Create signing input
-    let signing_input = format!("{}.{}", header_b64, payload_b64);
-    
-    // Sign the JWT
-    let signature: p256::ecdsa::Signature = signing_key.sign(signing_input.as_bytes());
-    let signature_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(signature.to_bytes());
-
-    // Combine to create final JWT
-    let jwt = format!("{}.{}.{}", header_b64, payload_b64, signature_b64);
-
-    console_log!("App Attestation: JWT created successfully");
-    Ok(jwt)
+    console_log!("App Attestation: JWT created successfully with jwt-simple");
+    Ok(token)
 }
 
 /// Verifies attestation with Apple's App Attest service

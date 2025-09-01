@@ -160,7 +160,7 @@ pub async fn create_user_internal(
                 })?;
 
                 // Validate the attestation token  
-                console_log!("iOS App Attestation: Token received, validation currently disabled for compilation compatibility");
+                console_log!("iOS App Attestation: Token received, validation ready but temporarily disabled due to Handler trait compilation issue");
 
                 console_log!("iOS validation: App Attestation validation completed");
             }
