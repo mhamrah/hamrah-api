@@ -2,12 +2,7 @@ use super::{ApiError, ApiResult};
 use crate::auth::{app_attestation, session, tokens};
 use crate::db::{schema::User, Database};
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    response::Json,
-    Json as JsonExtractor,
-};
+use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx_d1::{query, query_as};
@@ -155,17 +150,21 @@ pub async fn create_user_internal(
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let attestation_token = request.client_attestation.as_deref().ok_or_else(|| {
+                let _attestation_token = request.client_attestation.as_deref().ok_or_else(|| {
                     ApiError::ValidationError("iOS App Attestation required".to_string())
                 })?;
 
-                // Validate the attestation token  
+                // Validate the attestation token
                 console_log!("iOS App Attestation: Token received, validation ready but temporarily disabled due to Handler trait compilation issue");
 
                 console_log!("iOS validation: App Attestation validation completed");
             }
         }
-        _ => return Err(ApiError::ValidationError("Unsupported platform".to_string())),
+        _ => {
+            return Err(ApiError::ValidationError(
+                "Unsupported platform".to_string(),
+            ))
+        }
     }
 
     // Log the incoming request for debugging
@@ -359,15 +358,20 @@ pub async fn create_tokens_internal(
                 console_log!("iOS validation: Simulator detected, bypassing App Attestation");
             } else {
                 // For real devices, require App Attestation
-                let _attestation_token = request.client_attestation.as_deref().ok_or_else(|| {
-                    ApiError::ValidationError("iOS App Attestation required".to_string())
-                })?;
+                let _attestation_token =
+                    request.client_attestation.as_deref().ok_or_else(|| {
+                        ApiError::ValidationError("iOS App Attestation required".to_string())
+                    })?;
 
                 console_log!("iOS App Attestation: Token received, validation currently disabled for compilation compatibility");
             }
             console_log!("iOS validation: App Attestation validation completed");
         }
-        _ => return Err(ApiError::ValidationError("Unsupported platform".to_string())),
+        _ => {
+            return Err(ApiError::ValidationError(
+                "Unsupported platform".to_string(),
+            ))
+        }
     }
 
     // Log the incoming request for debugging
