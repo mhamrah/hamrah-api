@@ -58,6 +58,10 @@ fn app_router(state: AppState) -> Router {
         )
         // Public endpoints for client-side API access
         .route(
+            "/api/auth/native",
+            post(handlers::auth::native_auth_endpoint),
+        )
+        .route(
             "/api/auth/sessions/validate",
             get(handlers::auth::validate_session),
         )
@@ -70,11 +74,11 @@ fn app_router(state: AppState) -> Router {
             post(handlers::auth::refresh_token_endpoint),
         )
         .route(
-            "/api/auth/tokens/:token_id/revoke",
+            "/api/auth/tokens/{token_id}/revoke",
             delete(handlers::auth::revoke_token_endpoint),
         )
         .route(
-            "/api/auth/users/:user_id/tokens/revoke",
+            "/api/auth/users/{user_id}/tokens/revoke",
             delete(handlers::auth::revoke_all_user_tokens_endpoint),
         )
         // User endpoints
@@ -88,30 +92,30 @@ fn app_router(state: AppState) -> Router {
             "/api/users/me",
             delete(handlers::users::delete_user_account),
         )
-        .route("/api/users/:user_id", get(handlers::users::get_user_by_id))
+        .route("/api/users/{user_id}", get(handlers::users::get_user_by_id))
         // WebAuthn data persistence endpoints (called by hamrah-web)
         .route(
             "/api/webauthn/credentials",
             post(handlers::webauthn_data::store_webauthn_credential),
         )
         .route(
-            "/api/webauthn/credentials/:credential_id",
+            "/api/webauthn/credentials/{credential_id}",
             get(handlers::webauthn_data::get_webauthn_credential),
         )
         .route(
-            "/api/webauthn/credentials/:credential_id",
+            "/api/webauthn/credentials/{credential_id}",
             delete(handlers::webauthn_data::delete_webauthn_credential),
         )
         .route(
-            "/api/webauthn/credentials/:credential_id/counter",
+            "/api/webauthn/credentials/{credential_id}/counter",
             patch(handlers::webauthn_data::update_webauthn_credential_counter),
         )
         .route(
-            "/api/webauthn/credentials/:credential_id/name",
+            "/api/webauthn/credentials/{credential_id}/name",
             patch(handlers::webauthn_data::update_webauthn_credential_name),
         )
         .route(
-            "/api/webauthn/users/:user_id/credentials",
+            "/api/webauthn/users/{user_id}/credentials",
             get(handlers::webauthn_data::get_user_webauthn_credentials),
         )
         .route(
@@ -119,15 +123,15 @@ fn app_router(state: AppState) -> Router {
             post(handlers::webauthn_data::store_webauthn_challenge),
         )
         .route(
-            "/api/webauthn/challenges/:challenge_id",
+            "/api/webauthn/challenges/{challenge_id}",
             get(handlers::webauthn_data::get_webauthn_challenge),
         )
         .route(
-            "/api/webauthn/challenges/:challenge_id",
+            "/api/webauthn/challenges/{challenge_id}",
             delete(handlers::webauthn_data::delete_webauthn_challenge),
         )
         .route(
-            "/api/users/by-email/:email",
+            "/api/users/by-email/{email}",
             get(handlers::webauthn_data::get_user_by_email),
         )
         .layer(
