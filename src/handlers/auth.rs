@@ -260,7 +260,7 @@ pub async fn native_auth_endpoint(
         .bind(&request.name)
         .bind(&request.picture)
         .bind(datetime_to_timestamp(now)) // email_verified
-        .bind(&format!("{}_oauth", request.provider))
+        .bind(format!("{}_oauth", request.provider))
         .bind(&request.provider)
         .bind(email) // use email as provider_id for now
         .bind(&platform)
