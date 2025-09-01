@@ -65,13 +65,3 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      
-      # 8. Deploy a preview version for Pull Requests
-      - name: Deploy Preview (Pull Request) 🚀
-        if: github.event_name == 'pull_request'
-        run: wrangler deploy --env pr-${{ github.event.number }}
-        
-      # 9. Deploy to production for merges to the main branch
-      - name: Deploy to Production PRODUCTION 🚀
-        if: github.ref == 'refs/heads/main'
-        run: wrangler deploy
