@@ -150,9 +150,10 @@ pub async fn create_user_internal(
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let _attestation_token = request.client_attestation.as_deref().ok_or_else(|| {
-                    ApiError::ValidationError("iOS App Attestation required".to_string())
-                })?;
+                let _attestation_token =
+                    request.client_attestation.as_deref().ok_or_else(|| {
+                        ApiError::ValidationError("iOS App Attestation required".to_string())
+                    })?;
 
                 // Validate the attestation token
                 console_log!("iOS App Attestation: Token received, validation ready but temporarily disabled due to Handler trait compilation issue");
