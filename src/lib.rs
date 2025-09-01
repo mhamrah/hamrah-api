@@ -13,7 +13,9 @@ use db::{
     migrations::{get_migrations, MigrationRunner},
     Database,
 };
-use tower_http::cors::{Any, CorsLayer};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use http::Method;
+use tower_http::cors::CorsLayer;
 use tower_service::Service;
 use worker::*;
 
@@ -140,8 +142,14 @@ fn app_router(state: AppState) -> Router {
                     "https://hamrah.app".parse::<HeaderValue>().unwrap(),
                     "https://localhost:5173".parse::<HeaderValue>().unwrap(),
                 ])
-                .allow_methods(Any)
-                .allow_headers(Any)
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                    Method::PATCH,
+                ])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE, ACCEPT])
                 .allow_credentials(true),
         )
         .with_state(state)
