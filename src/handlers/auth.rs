@@ -170,8 +170,11 @@ pub async fn native_auth_endpoint(
     use uuid::Uuid;
     use worker::console_log;
 
-    console_log!("🔍 Native auth request received: provider={}, email={:?}", 
-                 request.provider, request.email);
+    console_log!(
+        "🔍 Native auth request received: provider={}, email={:?}",
+        request.provider,
+        request.email
+    );
 
     // Get user agent for platform detection
     let user_agent = headers
@@ -222,7 +225,7 @@ pub async fn native_auth_endpoint(
 
     let user_id = if let Some(user) = existing_user {
         console_log!("✅ Found existing user: {}", user.id);
-        
+
         // Update last login information
         query("UPDATE users SET last_login_at = ?, last_login_platform = ? WHERE id = ?")
             .bind(datetime_to_timestamp(Utc::now()))
@@ -234,13 +237,13 @@ pub async fn native_auth_endpoint(
                 console_log!("❌ Database error updating user login: {}", e);
                 ApiError::DatabaseError(e.to_string())
             })?;
-        
+
         user.id
     } else {
         // Create new user
         let new_user_id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        
+
         console_log!("🔍 Creating new user: {}", new_user_id);
 
         query(
@@ -310,9 +313,14 @@ pub async fn native_auth_endpoint(
         created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
     };
 
-    let expires_in = ((token_pair.access_expires_at - datetime_to_timestamp(Utc::now())) / 1000).max(0);
+    let expires_in =
+        ((token_pair.access_expires_at - datetime_to_timestamp(Utc::now())) / 1000).max(0);
 
-    console_log!("✅ Native auth successful for user: {}, expires_in: {}", user_response.email, expires_in);
+    console_log!(
+        "✅ Native auth successful for user: {}, expires_in: {}",
+        user_response.email,
+        expires_in
+    );
 
     Ok(Json(AuthResponse {
         success: true,
