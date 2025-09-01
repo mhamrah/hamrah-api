@@ -133,27 +133,13 @@ jobs:
           echo "PREVIEW_URL=https://hamrah-api-${SANITIZED_BRANCH}.hamrah.workers.dev" >> $GITHUB_ENV
         fi
 
-    - name: Upload Worker Version
-      id: upload
-      uses: cloudflare/wrangler-action@v3
-      with:
-        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        command: versions upload --message "${{ env.VERSION_MESSAGE }}" --tag "${{ env.VERSION_TAG }}" --json
-        
-    - name: Extract Version ID
-      if: env.SHOULD_DEPLOY == 'true'
-      run: |
-        VERSION_ID=$(echo '${{ steps.upload.outputs.command-output }}' | jq -r '.version_id // .result.id')
-        echo "VERSION_ID=${VERSION_ID}" >> $GITHUB_ENV
-
     - name: Deploy to Production
       if: env.SHOULD_DEPLOY == 'true'
       uses: cloudflare/wrangler-action@v3
       with:
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        command: versions deploy --version-id ${{ env.VERSION_ID }} --percentage 100
+        command: deploy
 
     - name: Create Branch Deployment
       if: env.SHOULD_DEPLOY == 'false'
