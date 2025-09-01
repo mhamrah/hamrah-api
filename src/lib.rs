@@ -138,8 +138,7 @@ fn app_router(state: AppState) -> Router {
             CorsLayer::new()
                 .allow_origin([
                     "https://hamrah.app".parse::<HeaderValue>().unwrap(),
-                    "http://localhost:5173".parse::<HeaderValue>().unwrap(),
-                    "http://localhost:3000".parse::<HeaderValue>().unwrap(),
+                    "https://localhost:5173".parse::<HeaderValue>().unwrap(),
                 ])
                 .allow_methods(Any)
                 .allow_headers(Any)
