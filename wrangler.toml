@@ -19,4 +19,5 @@ globs = ["**/*.wasm"]
 type = "CompiledWasm"
 fallthrough = false
 
-
+[observability.logs]
+enabled = true
