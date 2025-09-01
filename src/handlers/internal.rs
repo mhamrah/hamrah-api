@@ -133,53 +133,107 @@ pub async fn create_user_internal(
     )
     .await?;
 
-    let user_id = Uuid::new_v4().to_string();
+    // Log the incoming request for debugging
+    console_log!(
+        "create_user_internal: provider={}, auth_method={}, email={}, platform={}",
+        request.provider,
+        request.auth_method,
+        request.email,
+        request.platform
+    );
+
+    // Validate email is present and not empty
+    if request.email.trim().is_empty() {
+        console_log!("create_user_internal: Email is empty for provider={}", request.provider);
+        return Err(ApiError::ValidationError(
+            "Email is required for authentication".to_string(),
+        ));
+    }
+
     let now = Utc::now();
 
-    // Check if user already exists
-    let existing = query("SELECT id FROM users WHERE email = ?")
+    // Find or create user by email
+    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
         .bind(&request.email)
         .fetch_optional(&mut db.conn)
         .await
         .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
-    if existing.is_some() {
-        return Err(ApiError::ValidationError("User already exists".to_string()));
-    }
+    let user_id = if let Some(existing_user) = user {
+        // User exists - update their auth info and login time
+        query(
+            r#"
+            UPDATE users SET
+                name = COALESCE(?, name),
+                picture = COALESCE(?, picture),
+                auth_method = ?,
+                provider = ?,
+                provider_id = ?,
+                last_login_platform = ?,
+                last_login_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&request.name)
+        .bind(&request.picture)
+        .bind(&request.auth_method)
+        .bind(&request.provider)
+        .bind(&request.provider_id)
+        .bind(&request.platform)
+        .bind(datetime_to_timestamp(now))
+        .bind(datetime_to_timestamp(now))
+        .bind(&existing_user.id)
+        .execute(&mut db.conn)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
-    // Create new user
-    query(
-        r#"
-        INSERT INTO users (
-            id, email, name, picture, email_verified, auth_method,
-            provider, provider_id, last_login_platform, last_login_at,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(&user_id)
-    .bind(&request.email)
-    .bind(&request.name)
-    .bind(&request.picture)
-    .bind(datetime_to_timestamp(now)) // email_verified
-    .bind(&request.auth_method)
-    .bind(&request.provider)
-    .bind(&request.provider_id)
-    .bind(&request.platform)
-    .bind(datetime_to_timestamp(now)) // last_login_at
-    .bind(datetime_to_timestamp(now)) // created_at
-    .bind(datetime_to_timestamp(now)) // updated_at
-    .execute(&mut db.conn)
-    .await
-    .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        existing_user.id
+    } else {
+        // Create new user
+        let new_user_id = Uuid::new_v4().to_string();
+        query(
+            r#"
+            INSERT INTO users (
+                id, email, name, picture, email_verified, auth_method,
+                provider, provider_id, last_login_platform, last_login_at,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&new_user_id)
+        .bind(&request.email)
+        .bind(&request.name)
+        .bind(&request.picture)
+        .bind(datetime_to_timestamp(now)) // email_verified
+        .bind(&request.auth_method)
+        .bind(&request.provider)
+        .bind(&request.provider_id)
+        .bind(&request.platform)
+        .bind(datetime_to_timestamp(now)) // last_login_at
+        .bind(datetime_to_timestamp(now)) // created_at
+        .bind(datetime_to_timestamp(now)) // updated_at
+        .execute(&mut db.conn)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+
+        new_user_id
+    };
+
+    // Get the final user data
+    let final_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_one(&mut db.conn)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
 
     let user_response = UserResponse {
-        id: user_id,
-        email: request.email,
-        name: request.name,
-        picture: request.picture,
-        auth_method: Some(request.auth_method),
-        created_at: timestamp_to_datetime(datetime_to_timestamp(now)).to_rfc3339(),
+        id: final_user.id,
+        email: final_user.email,
+        name: final_user.name,
+        picture: final_user.picture,
+        auth_method: final_user.auth_method,
+        created_at: timestamp_to_datetime(final_user.created_at).to_rfc3339(),
     };
 
     Ok(Json(InternalAuthResponse {
@@ -257,6 +311,23 @@ pub async fn create_tokens_internal(
         request.client_attestation.as_deref(),
     )
     .await?;
+
+    // Log the incoming request for debugging
+    console_log!(
+        "create_tokens_internal: provider={}, auth_method={}, email={}, platform={}",
+        request.provider,
+        request.auth_method,
+        request.email,
+        request.platform
+    );
+
+    // Validate email is present and not empty
+    if request.email.trim().is_empty() {
+        console_log!("create_tokens_internal: Email is empty for provider={}", request.provider);
+        return Err(ApiError::ValidationError(
+            "Email is required for authentication".to_string(),
+        ));
+    }
 
     // Find or create user first
     let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
