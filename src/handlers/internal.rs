@@ -144,7 +144,10 @@ pub async fn create_user_internal(
 
     // Validate email is present and not empty
     if request.email.trim().is_empty() {
-        console_log!("create_user_internal: Email is empty for provider={}", request.provider);
+        console_log!(
+            "create_user_internal: Email is empty for provider={}",
+            request.provider
+        );
         return Err(ApiError::ValidationError(
             "Email is required for authentication".to_string(),
         ));
@@ -323,7 +326,10 @@ pub async fn create_tokens_internal(
 
     // Validate email is present and not empty
     if request.email.trim().is_empty() {
-        console_log!("create_tokens_internal: Email is empty for provider={}", request.provider);
+        console_log!(
+            "create_tokens_internal: Email is empty for provider={}",
+            request.provider
+        );
         return Err(ApiError::ValidationError(
             "Email is required for authentication".to_string(),
         ));
