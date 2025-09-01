@@ -1,3 +1,4 @@
+pub mod app_attestation;
 pub mod cookies;
 pub mod session;
 pub mod tokens;

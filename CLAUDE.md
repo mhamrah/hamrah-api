@@ -106,3 +106,4 @@ Handles API access/refresh tokens for mobile applications with platform tracking
 - **WebAuthn Support**: Passwordless authentication with passkeys
 - **CORS Configuration**: Restricted to authorized origins
 - **Rate Limiting**: Implemented at Cloudflare level
+- always run the formatter before committing code and after all edits

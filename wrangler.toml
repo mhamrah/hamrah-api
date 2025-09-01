@@ -12,7 +12,10 @@ database_name = "prod-hamrah-app-auth"
 database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 
 [vars]
+APPLE_TEAM_ID = "UR6RM9YCF7"
+APPLE_BUNDLE_ID = "app.hamrah.ios"
 ENVIRONMENT = "production"
+APPLE_KEY_ID = "PGW4JA9UQF"
 
 [[rules]]
 globs = ["**/*.wasm"]
