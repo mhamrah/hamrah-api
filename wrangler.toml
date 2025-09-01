@@ -21,6 +21,17 @@ dir = "build/worker"
 format = "modules"
 main = "./shim.mjs"
 
-[[build.upload.rules]]
+compatibility_date = "2023-08-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[rules]]
 globs = ["**/*.wasm"]
 type = "CompiledWasm"
+
+[d1_databases]
+DB = { binding = "DB", database_name = "hamrah-db-production", database_id = "c52042c3-9236-4ab6-860b-9b15cf3799cb" }
