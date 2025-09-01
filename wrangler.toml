@@ -3,11 +3,6 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2025-08-22"
 compatibility_flags = ["nodejs_compat"]
 
-# Production routes
-[[routes]]
-pattern = "api.hamrah.app/*"
-zone_id = " "
-
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
