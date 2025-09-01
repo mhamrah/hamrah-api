@@ -16,16 +16,12 @@ binding = "DB"
 database_name = "prod-hamrah-app-auth"
 database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 
-[build.upload]
-dir = "build/worker"
-format = "modules"
-main = "./shim.mjs"
-
 [vars]
 ENVIRONMENT = "production"
 
 [[rules]]
 globs = ["**/*.wasm"]
 type = "CompiledWasm"
+fallthrough = false
 
 
