@@ -3,7 +3,7 @@
 // The actual WebAuthn protocol logic is handled in hamrah-web
 
 use super::{ApiError, ApiResult};
-use crate::db::schema::{User, WebAuthnCredential, WebAuthnChallenge};
+use crate::db::schema::{User, WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
 use axum::{
     extract::{Path, State},
@@ -82,17 +82,20 @@ pub async fn store_webauthn_credential(
     JsonExtractor(payload): JsonExtractor<StoreCredentialRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let now = datetime_to_timestamp(Utc::now());
-    
+
     // Convert Vec<u8> to base64 string for storage
     let public_key_b64 = BASE64_STANDARD.encode(&payload.public_key);
     let aaguid_b64 = payload.aaguid.as_ref().map(|a| BASE64_STANDARD.encode(a));
-    let transports_json = payload.transports.as_ref().map(|t| serde_json::to_string(t).unwrap_or_default());
+    let transports_json = payload
+        .transports
+        .as_ref()
+        .map(|t| serde_json::to_string(t).unwrap_or_default());
 
     query(
         r#"INSERT INTO webauthn_credentials 
            (id, user_id, public_key, counter, transports, aaguid, credential_type, 
             user_verified, credential_device_type, credential_backed_up, name, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&payload.id)
     .bind(&payload.user_id)
@@ -122,26 +125,32 @@ pub async fn get_webauthn_credential(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let credential = query_as::<WebAuthnCredential>(
-        "SELECT * FROM webauthn_credentials WHERE id = ?"
-    )
-    .bind(&credential_id)
-    .fetch_optional(&mut state.db.conn)
-    .await
-    .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
+    let credential =
+        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+            .bind(&credential_id)
+            .fetch_optional(&mut state.db.conn)
+            .await
+            .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
 
     match credential {
         Some(cred) => {
             // Convert base64 strings back to Vec<u8>
-            let public_key = BASE64_STANDARD.decode(&cred.public_key)
-                .map_err(|e| ApiError::InternalServerError(format!("Failed to decode public key: {:?}", e)))?;
-            
-            let aaguid = cred.aaguid.as_ref()
+            let public_key = BASE64_STANDARD.decode(&cred.public_key).map_err(|e| {
+                ApiError::InternalServerError(format!("Failed to decode public key: {:?}", e))
+            })?;
+
+            let aaguid = cred
+                .aaguid
+                .as_ref()
                 .map(|a| BASE64_STANDARD.decode(a))
                 .transpose()
-                .map_err(|e| ApiError::InternalServerError(format!("Failed to decode aaguid: {:?}", e)))?;
+                .map_err(|e| {
+                    ApiError::InternalServerError(format!("Failed to decode aaguid: {:?}", e))
+                })?;
 
-            let transports: Option<Vec<String>> = cred.transports.as_ref()
+            let transports: Option<Vec<String>> = cred
+                .transports
+                .as_ref()
                 .map(|t| serde_json::from_str(t).unwrap_or_default());
 
             let response = CredentialResponse {
@@ -164,11 +173,11 @@ pub async fn get_webauthn_credential(
                 "success": true,
                 "credential": response
             })))
-        },
+        }
         None => Ok(Json(serde_json::json!({
             "success": false,
             "error": "Credential not found"
-        })))
+        }))),
     }
 }
 
@@ -179,7 +188,7 @@ pub async fn get_user_webauthn_credentials(
     Path(user_id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let credentials = query_as::<WebAuthnCredential>(
-        "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC"
+        "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
     )
     .bind(&user_id)
     .fetch_all(&mut state.db.conn)
@@ -191,10 +200,15 @@ pub async fn get_user_webauthn_credentials(
         .filter_map(|cred| {
             // Convert base64 strings back to Vec<u8>
             let public_key = BASE64_STANDARD.decode(&cred.public_key).ok()?;
-            let aaguid = cred.aaguid.as_ref()
+            let aaguid = cred
+                .aaguid
+                .as_ref()
                 .map(|a| BASE64_STANDARD.decode(a))
-                .transpose().ok()?;
-            let transports: Option<Vec<String>> = cred.transports.as_ref()
+                .transpose()
+                .ok()?;
+            let transports: Option<Vec<String>> = cred
+                .transports
+                .as_ref()
                 .map(|t| serde_json::from_str(t).unwrap_or_default());
 
             Some(CredentialResponse {
@@ -228,15 +242,15 @@ pub async fn update_webauthn_credential_counter(
     Path(credential_id): Path<String>,
     JsonExtractor(payload): JsonExtractor<UpdateCredentialCounterRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    query(
-        "UPDATE webauthn_credentials SET counter = ?, last_used = ? WHERE id = ?"
-    )
-    .bind(payload.counter)
-    .bind(payload.last_used)
-    .bind(&credential_id)
-    .execute(&mut state.db.conn)
-    .await
-    .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential counter: {:?}", e)))?;
+    query("UPDATE webauthn_credentials SET counter = ?, last_used = ? WHERE id = ?")
+        .bind(payload.counter)
+        .bind(payload.last_used)
+        .bind(&credential_id)
+        .execute(&mut state.db.conn)
+        .await
+        .map_err(|e| {
+            ApiError::DatabaseError(format!("Failed to update credential counter: {:?}", e))
+        })?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -269,7 +283,8 @@ pub async fn update_webauthn_credential_name(
     Path(credential_id): Path<String>,
     JsonExtractor(payload): JsonExtractor<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let name = payload.get("name")
+    let name = payload
+        .get("name")
         .and_then(|n| n.as_str())
         .ok_or_else(|| ApiError::ValidationError("Name is required".to_string()))?;
 
@@ -278,7 +293,9 @@ pub async fn update_webauthn_credential_name(
         .bind(&credential_id)
         .execute(&mut state.db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(format!("Failed to update credential name: {:?}", e)))?;
+        .map_err(|e| {
+            ApiError::DatabaseError(format!("Failed to update credential name: {:?}", e))
+        })?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -342,11 +359,11 @@ pub async fn get_webauthn_challenge(
                 "success": true,
                 "challenge": response
             })))
-        },
+        }
         None => Ok(Json(serde_json::json!({
             "success": false,
             "error": "Challenge not found"
-        })))
+        }))),
     }
 }
 
@@ -388,6 +405,6 @@ pub async fn get_user_by_email(
         None => Ok(Json(serde_json::json!({
             "success": false,
             "error": "User not found"
-        })))
+        }))),
     }
 }
