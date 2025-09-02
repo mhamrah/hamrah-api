@@ -415,7 +415,7 @@ pub async fn app_attestation_challenge(
     rand::thread_rng().fill_bytes(&mut challenge_bytes);
 
     use base64::Engine;
-    let challenge_base64 = base64::engine::general_purpose::STANDARD.encode(&challenge_bytes);
+    let challenge_base64 = base64::engine::general_purpose::STANDARD.encode(challenge_bytes);
     let challenge_id = uuid::Uuid::new_v4().to_string();
 
     // Store challenge in database with expiration (10 minutes)
