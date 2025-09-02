@@ -63,6 +63,15 @@ fn app_router(state: AppState) -> Router {
             "/api/auth/native",
             post(handlers::auth::native_auth_endpoint),
         )
+        // App Attestation endpoints
+        .route(
+            "/api/app-attestation/challenge",
+            post(handlers::auth::app_attestation_challenge),
+        )
+        .route(
+            "/api/app-attestation/verify",
+            post(handlers::auth::app_attestation_verify),
+        )
         .route(
             "/api/auth/sessions/validate",
             get(handlers::auth::validate_session),
