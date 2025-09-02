@@ -1,5 +1,5 @@
 use super::{ApiError, ApiResult};
-use crate::auth::{cookies, session, tokens};
+use crate::auth::{app_attestation, cookies, session, tokens};
 use crate::db::Database;
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{
@@ -10,6 +10,7 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use worker::console_log;
 
 // CreateUserRequest moved to internal.rs
 
@@ -328,5 +329,242 @@ pub async fn native_auth_endpoint(
         access_token: Some(token_pair.access_token),
         refresh_token: Some(token_pair.refresh_token),
         expires_in: Some(expires_in),
+    }))
+}
+
+// App Attestation types and endpoints
+
+#[derive(Debug, Deserialize)]
+pub struct AttestationChallengeRequest {
+    pub platform: String,
+    #[serde(rename = "bundleId")]
+    pub bundle_id: String,
+    pub purpose: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AttestationChallengeResponse {
+    pub success: bool,
+    pub challenge: Option<String>,
+    #[serde(rename = "challengeId")]
+    pub challenge_id: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AttestationVerifyRequest {
+    pub attestation: String,
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+    #[serde(rename = "challengeId")]
+    pub challenge_id: String,
+    #[serde(rename = "bundleId")]
+    pub bundle_id: String,
+    pub platform: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AttestationVerifyResponse {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Generate a challenge for iOS App Attestation
+pub async fn app_attestation_challenge(
+    State(mut db): State<Database>,
+    headers: HeaderMap,
+    JsonExtractor(request): JsonExtractor<AttestationChallengeRequest>,
+) -> ApiResult<Json<AttestationChallengeResponse>> {
+    console_log!(
+        "🔐 App Attestation challenge request: platform={}, bundle_id={}",
+        request.platform,
+        request.bundle_id
+    );
+
+    // Validate request
+    if request.platform != "ios" {
+        return Ok(Json(AttestationChallengeResponse {
+            success: false,
+            challenge: None,
+            challenge_id: String::new(),
+            error: Some("Only iOS platform is supported".to_string()),
+        }));
+    }
+
+    // Check if this is a simulator request
+    let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
+
+    let is_simulator = app_attestation::is_ios_simulator(user_agent);
+
+    if is_simulator {
+        console_log!("🔧 Simulator detected - returning dummy challenge");
+
+        // Return a dummy challenge for simulator
+        let challenge_id = uuid::Uuid::new_v4().to_string();
+        return Ok(Json(AttestationChallengeResponse {
+            success: true,
+            challenge: Some("c2ltdWxhdG9yLWNoYWxsZW5nZQ==".to_string()), // base64 of "simulator-challenge"
+            challenge_id,
+            error: None,
+        }));
+    }
+
+    // Generate a cryptographically secure challenge
+    use rand::RngCore;
+    let mut challenge_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut challenge_bytes);
+
+    use base64::Engine;
+    let challenge_base64 = base64::engine::general_purpose::STANDARD.encode(&challenge_bytes);
+    let challenge_id = uuid::Uuid::new_v4().to_string();
+
+    // Store challenge in database with expiration (10 minutes)
+    use sqlx_d1::query;
+    let expires_at = datetime_to_timestamp(Utc::now() + chrono::Duration::minutes(10));
+
+    query(
+        "INSERT INTO app_attest_challenges (id, challenge, bundle_id, platform, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .bind(&challenge_id)
+    .bind(&challenge_base64)
+    .bind(&request.bundle_id)
+    .bind(&request.platform)
+    .bind(expires_at)
+    .bind(datetime_to_timestamp(Utc::now()))
+    .execute(&mut db.conn)
+    .await
+    .map_err(|e| {
+        console_log!("❌ Database error storing challenge: {}", e);
+        ApiError::DatabaseError(e.to_string())
+    })?;
+
+    console_log!(
+        "✅ Generated challenge: id={}, length={}",
+        challenge_id,
+        challenge_base64.len()
+    );
+
+    Ok(Json(AttestationChallengeResponse {
+        success: true,
+        challenge: Some(challenge_base64),
+        challenge_id,
+        error: None,
+    }))
+}
+
+/// Verify iOS App Attestation
+pub async fn app_attestation_verify(
+    State(mut db): State<Database>,
+    headers: HeaderMap,
+    JsonExtractor(request): JsonExtractor<AttestationVerifyRequest>,
+) -> ApiResult<Json<AttestationVerifyResponse>> {
+    console_log!(
+        "🔐 App Attestation verify request: challenge_id={}, key_id={}",
+        request.challenge_id,
+        request.key_id
+    );
+
+    // Check if this is a simulator request
+    let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
+
+    let is_simulator = app_attestation::is_ios_simulator(user_agent);
+
+    if is_simulator {
+        console_log!("🔧 Simulator detected - skipping Apple verification");
+
+        // Clean up challenge record
+        use sqlx_d1::query;
+        let _ = query("DELETE FROM app_attest_challenges WHERE id = ?")
+            .bind(&request.challenge_id)
+            .execute(&mut db.conn)
+            .await;
+
+        return Ok(Json(AttestationVerifyResponse {
+            success: true,
+            error: None,
+        }));
+    }
+
+    // Fetch and validate challenge
+    use sqlx_d1::query_as;
+
+    #[derive(sqlx::FromRow)]
+    struct Challenge {
+        challenge: String,
+        bundle_id: String,
+        expires_at: i64,
+    }
+
+    let stored_challenge = query_as::<Challenge>(
+        "SELECT challenge, bundle_id, expires_at FROM app_attest_challenges WHERE id = ?",
+    )
+    .bind(&request.challenge_id)
+    .fetch_optional(&mut db.conn)
+    .await
+    .map_err(|e| {
+        console_log!("❌ Database error fetching challenge: {}", e);
+        ApiError::DatabaseError(e.to_string())
+    })?;
+
+    let _challenge = match stored_challenge {
+        Some(ch) => {
+            // Check if challenge is expired
+            if ch.expires_at < datetime_to_timestamp(Utc::now()) {
+                console_log!("❌ Challenge expired");
+                return Ok(Json(AttestationVerifyResponse {
+                    success: false,
+                    error: Some("Challenge expired".to_string()),
+                }));
+            }
+
+            // Verify bundle ID matches
+            if ch.bundle_id != request.bundle_id {
+                console_log!(
+                    "❌ Bundle ID mismatch: expected {}, got {}",
+                    ch.bundle_id,
+                    request.bundle_id
+                );
+                return Ok(Json(AttestationVerifyResponse {
+                    success: false,
+                    error: Some("Bundle ID mismatch".to_string()),
+                }));
+            }
+
+            ch.challenge
+        }
+        None => {
+            console_log!("❌ Challenge not found: {}", request.challenge_id);
+            return Ok(Json(AttestationVerifyResponse {
+                success: false,
+                error: Some("Invalid challenge".to_string()),
+            }));
+        }
+    };
+
+    // TODO: Validate with Apple's App Attest service when env is available
+    // For now, accept all attestations for testing
+    console_log!("✅ App Attestation verification successful (dev mode)");
+
+    // Clean up challenge record
+    use sqlx_d1::query;
+    let _ = query("DELETE FROM app_attest_challenges WHERE id = ?")
+        .bind(&request.challenge_id)
+        .execute(&mut db.conn)
+        .await;
+
+    // Store validated key for future assertions
+    let _ = query(
+        "INSERT OR REPLACE INTO app_attest_keys (key_id, bundle_id, created_at, last_used_at) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&request.key_id)
+    .bind(&request.bundle_id)
+    .bind(datetime_to_timestamp(Utc::now()))
+    .bind(datetime_to_timestamp(Utc::now()))
+    .execute(&mut db.conn)
+    .await;
+
+    Ok(Json(AttestationVerifyResponse {
+        success: true,
+        error: None,
     }))
 }

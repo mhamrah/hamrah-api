@@ -174,6 +174,51 @@ impl Migration for InitialMigration {
     }
 }
 
+// App Attestation tables migration
+pub struct AppAttestationMigration;
+
+impl Migration for AppAttestationMigration {
+    fn version(&self) -> &'static str {
+        "002"
+    }
+
+    fn name(&self) -> &'static str {
+        "app_attestation_tables"
+    }
+
+    fn up(&self) -> &'static str {
+        r#"
+        CREATE TABLE app_attest_challenges (
+            id TEXT PRIMARY KEY,
+            challenge TEXT NOT NULL,
+            bundle_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE app_attest_keys (
+            key_id TEXT PRIMARY KEY,
+            bundle_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            last_used_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX app_attest_challenges_expires_idx ON app_attest_challenges(expires_at);
+        CREATE INDEX app_attest_keys_bundle_idx ON app_attest_keys(bundle_id);
+        "#
+    }
+
+    fn down(&self) -> &'static str {
+        r#"
+        DROP INDEX IF EXISTS app_attest_keys_bundle_idx;
+        DROP INDEX IF EXISTS app_attest_challenges_expires_idx;
+        DROP TABLE IF EXISTS app_attest_keys;
+        DROP TABLE IF EXISTS app_attest_challenges;
+        "#
+    }
+}
+
 pub fn get_migrations() -> Vec<&'static dyn Migration> {
-    vec![&InitialMigration]
+    vec![&InitialMigration, &AppAttestationMigration]
 }
