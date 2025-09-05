@@ -3,7 +3,7 @@
 // The actual WebAuthn protocol logic is handled in hamrah-web
 
 use super::{ApiError, ApiResult};
-use crate::db::schema::{User, WebAuthnChallenge, WebAuthnCredential};
+use crate::db::schema::{WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
 use axum::{
     extract::{Path, State},
