@@ -1,0 +1,26 @@
+name = "hamrah-api-preview"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-08-22"
+compatibility_flags = ["nodejs_compat"]
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dev-hamrah-app-auth"  # Use dev database for previews
+database_id = "dev-database-id-here"   # Replace with actual dev DB ID
+
+[vars]
+APPLE_TEAM_ID = "UR6RM9YCF7"
+APPLE_BUNDLE_ID = "app.hamrah.ios"
+ENVIRONMENT = "preview"
+APPLE_KEY_ID = "PGW4JA9UQF"
+
+[[rules]]
+globs = ["**/*.wasm"]
+type = "CompiledWasm"
+fallthrough = false
+
+[observability.logs]
+enabled = true

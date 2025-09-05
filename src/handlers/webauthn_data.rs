@@ -3,7 +3,7 @@
 // The actual WebAuthn protocol logic is handled in hamrah-web
 
 use super::{ApiError, ApiResult};
-use crate::db::schema::{User, WebAuthnChallenge, WebAuthnCredential};
+use crate::db::schema::{WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
 use axum::{
     extract::{Path, State},
@@ -385,26 +385,5 @@ pub async fn delete_webauthn_challenge(
     })))
 }
 
-/// GET /api/users/by-email/{email}
-/// Get user by email address
-pub async fn get_user_by_email(
-    State(mut state): State<AppState>,
-    Path(email): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
-        .bind(&email)
-        .fetch_optional(&mut state.db.conn)
-        .await
-        .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
-
-    match user {
-        Some(u) => Ok(Json(serde_json::json!({
-            "success": true,
-            "user": u
-        }))),
-        None => Ok(Json(serde_json::json!({
-            "success": false,
-            "error": "User not found"
-        }))),
-    }
-}
+// REMOVED: get_user_by_email endpoint for security reasons
+// Public user enumeration endpoint removed to prevent user discovery attacks

@@ -512,3 +512,39 @@ pub async fn validate_session_internal(
         Err(ApiError::Unauthorized)
     }
 }
+
+/// Internal endpoint to check if a user exists by email (service-to-service only)
+pub async fn check_user_by_email_internal(
+    State(mut db): State<Database>,
+    State(env): State<Env>,
+    headers: HeaderMap,
+    JsonExtractor(request): JsonExtractor<serde_json::Value>,
+) -> ApiResult<Json<serde_json::Value>> {
+    // Validate internal service call
+    validate_internal_service(&headers, &env).await?;
+
+    let email = request
+        .get("email")
+        .and_then(|e| e.as_str())
+        .ok_or_else(|| ApiError::ValidationError("Email is required".to_string()))?;
+
+    // Check if user exists
+    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
+        .bind(email)
+        .fetch_optional(&mut db.conn)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "user_exists": user.is_some(),
+        "user": user.map(|u| UserResponse {
+            id: u.id,
+            email: u.email,
+            name: u.name,
+            picture: u.picture,
+            auth_method: u.auth_method,
+            created_at: timestamp_to_datetime(u.created_at).to_rfc3339(),
+        })
+    })))
+}
