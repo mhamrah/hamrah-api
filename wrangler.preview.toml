@@ -8,8 +8,8 @@ command = "cargo install -q worker-build && worker-build --release"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "dev-hamrah-app-auth"  # Use dev database for previews
-database_id = "dev-database-id-here"   # Replace with actual dev DB ID
+database_name = "prod-hamrah-app-auth"  # Use prod database for previews (safe for preview deployments)
+database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 
 [vars]
 APPLE_TEAM_ID = "UR6RM9YCF7"
