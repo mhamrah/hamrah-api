@@ -85,6 +85,10 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      # Install worker-build if not cached
+      - name: Install worker-build 🔧
+        run: which worker-build || cargo install -q worker-build
+
       # Deploy to preview environment
       - name: Deploy Preview 🚀
         uses: cloudflare/wrangler-action@v3
@@ -121,6 +125,10 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # Install worker-build if not cached
+      - name: Install worker-build 🔧
+        run: which worker-build || cargo install -q worker-build
 
       # Deploy to production
       - name: Deploy Production 🚀
