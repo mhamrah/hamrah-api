@@ -55,6 +55,10 @@ fn app_router(state: AppState) -> Router {
             post(handlers::internal::validate_session_internal),
         )
         .route(
+            "/api/internal/users/by-email",
+            post(handlers::internal::check_user_by_email_internal),
+        )
+        .route(
             "/api/internal/tokens",
             post(handlers::internal::create_tokens_internal),
         )
@@ -140,10 +144,6 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/webauthn/challenges/{challenge_id}",
             delete(handlers::webauthn_data::delete_webauthn_challenge),
-        )
-        .route(
-            "/api/users/by-email/{email}",
-            get(handlers::webauthn_data::get_user_by_email),
         )
         .layer(
             CorsLayer::new()
