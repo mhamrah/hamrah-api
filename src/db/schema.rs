@@ -80,9 +80,9 @@ pub struct WebAuthnCredential {
     pub transports: Option<String>,
     pub aaguid: Option<String>,
     pub credential_type: String,
-    pub user_verified: bool,
+    pub user_verified: i64, // SQLite stores booleans as INTEGER (0/1)
     pub credential_device_type: Option<String>,
-    pub credential_backed_up: bool,
+    pub credential_backed_up: i64, // SQLite stores booleans as INTEGER (0/1)
     pub name: Option<String>,
     pub last_used: Option<i64>, // Unix timestamp in milliseconds
     pub created_at: i64,        // Unix timestamp in milliseconds
@@ -97,9 +97,9 @@ pub struct NewWebAuthnCredential {
     pub transports: Option<String>,
     pub aaguid: Option<String>,
     pub credential_type: String,
-    pub user_verified: bool,
+    pub user_verified: i64, // SQLite stores booleans as INTEGER (0/1)
     pub credential_device_type: Option<String>,
-    pub credential_backed_up: bool,
+    pub credential_backed_up: i64, // SQLite stores booleans as INTEGER (0/1)
     pub name: Option<String>,
 }
 

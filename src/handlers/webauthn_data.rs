@@ -105,9 +105,13 @@ pub async fn store_webauthn_credential(
     .bind(transports_json.as_deref())
     .bind(aaguid_b64.as_deref())
     .bind(&payload.credential_type)
-    .bind(payload.user_verified)
+    .bind(if payload.user_verified { 1i64 } else { 0i64 }) // Convert bool to i64
     .bind(payload.credential_device_type.as_deref())
-    .bind(payload.credential_backed_up)
+    .bind(if payload.credential_backed_up {
+        1i64
+    } else {
+        0i64
+    }) // Convert bool to i64
     .bind(payload.name.as_deref())
     .bind(now)
     .execute(&mut state.db.conn)
@@ -162,9 +166,9 @@ pub async fn get_webauthn_credential(
                 transports,
                 aaguid,
                 credential_type: cred.credential_type,
-                user_verified: cred.user_verified,
+                user_verified: cred.user_verified != 0, // Convert i64 to bool
                 credential_device_type: cred.credential_device_type,
-                credential_backed_up: cred.credential_backed_up,
+                credential_backed_up: cred.credential_backed_up != 0, // Convert i64 to bool
                 name: cred.name,
                 last_used: cred.last_used,
                 created_at: cred.created_at,
@@ -232,9 +236,9 @@ pub async fn get_user_webauthn_credentials(
                 transports,
                 aaguid,
                 credential_type: cred.credential_type,
-                user_verified: cred.user_verified,
+                user_verified: cred.user_verified != 0, // Convert i64 to bool
                 credential_device_type: cred.credential_device_type,
-                credential_backed_up: cred.credential_backed_up,
+                credential_backed_up: cred.credential_backed_up != 0, // Convert i64 to bool
                 name: cred.name,
                 last_used: cred.last_used,
                 created_at: cred.created_at,
