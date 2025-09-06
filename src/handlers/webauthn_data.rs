@@ -7,6 +7,7 @@ use crate::db::schema::{WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
 use axum::{
     extract::{Path, State},
+    http::HeaderMap,
     response::Json,
     Json as JsonExtractor,
 };
@@ -186,7 +187,19 @@ pub async fn get_webauthn_credential(
 pub async fn get_user_webauthn_credentials(
     State(mut state): State<AppState>,
     Path(user_id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Authenticate user
+    let current_user =
+        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await?;
+
+    // Authorization: users can only access their own credentials
+    if current_user.id != user_id {
+        return Ok(Json(serde_json::json!({
+            "success": false,
+            "error": "Unauthorized: cannot access other user's credentials"
+        })));
+    }
     let credentials = query_as::<WebAuthnCredential>(
         "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
     )
@@ -263,7 +276,36 @@ pub async fn update_webauthn_credential_counter(
 pub async fn delete_webauthn_credential(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
+    headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Authenticate user
+    let current_user =
+        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await?;
+
+    // Check if credential exists and belongs to the current user
+    let credential =
+        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+            .bind(&credential_id)
+            .fetch_optional(&mut state.db.conn)
+            .await
+            .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
+
+    match credential {
+        Some(cred) => {
+            if cred.user_id != current_user.id {
+                return Ok(Json(serde_json::json!({
+                    "success": false,
+                    "error": "Unauthorized: cannot delete other user's credential"
+                })));
+            }
+        }
+        None => {
+            return Ok(Json(serde_json::json!({
+                "success": false,
+                "error": "Credential not found"
+            })));
+        }
+    }
     query("DELETE FROM webauthn_credentials WHERE id = ?")
         .bind(&credential_id)
         .execute(&mut state.db.conn)
@@ -281,12 +323,42 @@ pub async fn delete_webauthn_credential(
 pub async fn update_webauthn_credential_name(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
+    headers: HeaderMap,
     JsonExtractor(payload): JsonExtractor<serde_json::Value>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Authenticate user
+    let current_user =
+        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await?;
+
     let name = payload
         .get("name")
         .and_then(|n| n.as_str())
         .ok_or_else(|| ApiError::ValidationError("Name is required".to_string()))?;
+
+    // Check if credential exists and belongs to the current user
+    let credential =
+        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+            .bind(&credential_id)
+            .fetch_optional(&mut state.db.conn)
+            .await
+            .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
+
+    match credential {
+        Some(cred) => {
+            if cred.user_id != current_user.id {
+                return Ok(Json(serde_json::json!({
+                    "success": false,
+                    "error": "Unauthorized: cannot update other user's credential"
+                })));
+            }
+        }
+        None => {
+            return Ok(Json(serde_json::json!({
+                "success": false,
+                "error": "Credential not found"
+            })));
+        }
+    }
 
     query("UPDATE webauthn_credentials SET name = ? WHERE id = ?")
         .bind(name)
