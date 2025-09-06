@@ -193,59 +193,168 @@ pub async fn get_user_webauthn_credentials(
     Path(user_id): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Json<serde_json::Value>> {
+    worker::console_log!(
+        "🔑 WEBAUTHN: Starting get_user_webauthn_credentials for user_id: {}",
+        user_id
+    );
+
     // Authenticate user
-    let current_user =
-        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await?;
+    worker::console_log!("🔑 WEBAUTHN: Attempting to authenticate user...");
+    let current_user = match crate::handlers::users::get_current_user_from_request(
+        &mut state.db,
+        &headers,
+    )
+    .await
+    {
+        Ok(user) => {
+            worker::console_log!(
+                "🔑 WEBAUTHN: ✅ Authentication successful for user: {}",
+                user.id
+            );
+            user
+        }
+        Err(e) => {
+            worker::console_log!("🔑 WEBAUTHN: ❌ Authentication failed: {:?}", e);
+            return Err(e);
+        }
+    };
 
     // Authorization: users can only access their own credentials
+    worker::console_log!(
+        "🔑 WEBAUTHN: Checking authorization - current_user.id: {}, requested_user_id: {}",
+        current_user.id,
+        user_id
+    );
     if current_user.id != user_id {
+        worker::console_log!(
+            "🔑 WEBAUTHN: ❌ Authorization failed - user {} cannot access credentials for user {}",
+            current_user.id,
+            user_id
+        );
         return Ok(Json(serde_json::json!({
             "success": false,
             "error": "Unauthorized: cannot access other user's credentials"
         })));
     }
-    let credentials = query_as::<WebAuthnCredential>(
+
+    worker::console_log!(
+        "🔑 WEBAUTHN: ✅ Authorization successful - fetching credentials from database..."
+    );
+    let credentials = match query_as::<WebAuthnCredential>(
         "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
     )
     .bind(&user_id)
     .fetch_all(&mut state.db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(format!("Database error: {:?}", e)))?;
+    {
+        Ok(creds) => {
+            worker::console_log!(
+                "🔑 WEBAUTHN: ✅ Database query successful - found {} credentials",
+                creds.len()
+            );
+            for (i, cred) in creds.iter().enumerate() {
+                worker::console_log!(
+                    "🔑 WEBAUTHN: Credential {}: id={}, user_verified={}, credential_backed_up={}",
+                    i,
+                    cred.id,
+                    cred.user_verified,
+                    cred.credential_backed_up
+                );
+            }
+            creds
+        }
+        Err(e) => {
+            worker::console_log!("🔑 WEBAUTHN: ❌ Database query failed: {:?}", e);
+            return Err(ApiError::DatabaseError(format!("Database error: {:?}", e)));
+        }
+    };
 
-    let credential_responses: Vec<CredentialResponse> = credentials
-        .into_iter()
-        .filter_map(|cred| {
-            // Convert base64 strings back to Vec<u8>
-            let public_key = BASE64_STANDARD.decode(&cred.public_key).ok()?;
-            let aaguid = cred
-                .aaguid
-                .as_ref()
-                .map(|a| BASE64_STANDARD.decode(a))
-                .transpose()
-                .ok()?;
-            let transports: Option<Vec<String>> = cred
-                .transports
-                .as_ref()
-                .map(|t| serde_json::from_str(t).unwrap_or_default());
+    worker::console_log!(
+        "🔑 WEBAUTHN: Processing {} credentials for response...",
+        credentials.len()
+    );
+    let mut credential_responses: Vec<CredentialResponse> = Vec::new();
 
-            Some(CredentialResponse {
-                id: cred.id,
-                user_id: cred.user_id,
-                public_key,
-                counter: cred.counter,
-                transports,
-                aaguid,
-                credential_type: cred.credential_type,
-                user_verified: cred.user_verified != 0, // Convert i64 to bool
-                credential_device_type: cred.credential_device_type,
-                credential_backed_up: cred.credential_backed_up != 0, // Convert i64 to bool
-                name: cred.name,
-                last_used: cred.last_used,
-                created_at: cred.created_at,
-            })
-        })
-        .collect();
+    for (i, cred) in credentials.into_iter().enumerate() {
+        worker::console_log!("🔑 WEBAUTHN: Processing credential {}: {}", i, cred.id);
 
+        // Convert base64 strings back to Vec<u8>
+        let public_key = match BASE64_STANDARD.decode(&cred.public_key) {
+            Ok(key) => {
+                worker::console_log!(
+                    "🔑 WEBAUTHN: ✅ Public key decoded successfully for credential {}",
+                    cred.id
+                );
+                key
+            }
+            Err(e) => {
+                worker::console_log!(
+                    "🔑 WEBAUTHN: ❌ Failed to decode public key for credential {}: {:?}",
+                    cred.id,
+                    e
+                );
+                continue; // Skip this credential
+            }
+        };
+
+        let aaguid = match cred.aaguid.as_ref() {
+            Some(a) => match BASE64_STANDARD.decode(a) {
+                Ok(decoded) => {
+                    worker::console_log!(
+                        "🔑 WEBAUTHN: ✅ AAGUID decoded successfully for credential {}",
+                        cred.id
+                    );
+                    Some(decoded)
+                }
+                Err(e) => {
+                    worker::console_log!(
+                        "🔑 WEBAUTHN: ❌ Failed to decode AAGUID for credential {}: {:?}",
+                        cred.id,
+                        e
+                    );
+                    continue; // Skip this credential
+                }
+            },
+            None => {
+                worker::console_log!("🔑 WEBAUTHN: No AAGUID for credential {}", cred.id);
+                None
+            }
+        };
+
+        let transports: Option<Vec<String>> = cred
+            .transports
+            .as_ref()
+            .map(|t| serde_json::from_str(t).unwrap_or_default());
+
+        worker::console_log!("🔑 WEBAUTHN: Converting boolean fields - user_verified: {} -> {}, credential_backed_up: {} -> {}", 
+            cred.user_verified, cred.user_verified != 0, cred.credential_backed_up, cred.credential_backed_up != 0);
+
+        credential_responses.push(CredentialResponse {
+            id: cred.id.clone(),
+            user_id: cred.user_id,
+            public_key,
+            counter: cred.counter,
+            transports,
+            aaguid,
+            credential_type: cred.credential_type,
+            user_verified: cred.user_verified != 0, // Convert i64 to bool
+            credential_device_type: cred.credential_device_type,
+            credential_backed_up: cred.credential_backed_up != 0, // Convert i64 to bool
+            name: cred.name,
+            last_used: cred.last_used,
+            created_at: cred.created_at,
+        });
+
+        worker::console_log!(
+            "🔑 WEBAUTHN: ✅ Successfully processed credential {}",
+            cred.id
+        );
+    }
+
+    worker::console_log!(
+        "🔑 WEBAUTHN: ✅ Returning {} processed credentials",
+        credential_responses.len()
+    );
     Ok(Json(serde_json::json!({
         "success": true,
         "credentials": credential_responses

@@ -40,37 +40,127 @@ pub async fn get_current_user_from_request(
     db: &mut Database,
     headers: &HeaderMap,
 ) -> ApiResult<User> {
+    worker::console_log!("🔐 AUTH: Starting authentication check");
+
+    // Log all headers for debugging
+    for (name, value) in headers.iter() {
+        if let Ok(value_str) = value.to_str() {
+            // Mask sensitive values but show their presence
+            let masked_value = if name.as_str().to_lowercase().contains("auth")
+                || name.as_str().to_lowercase().contains("cookie")
+                || name.as_str().to_lowercase().contains("session")
+            {
+                format!(
+                    "{}...{}",
+                    &value_str[..std::cmp::min(8, value_str.len())],
+                    if value_str.len() > 8 {
+                        &value_str[value_str.len() - 4..]
+                    } else {
+                        ""
+                    }
+                )
+            } else {
+                value_str.to_string()
+            };
+            worker::console_log!("🔐 AUTH: Header {}: {}", name.as_str(), masked_value);
+        }
+    }
+
     // First try session cookie
     if let Some(session_token) = crate::auth::cookies::get_cookie_value(headers, "session") {
-        if let Some((_session, user)) = session::validate_session_token(db, &session_token)
-            .await
-            .map_err(|e| ApiError::DatabaseError(e.to_string()))?
-        {
-            return Ok(user);
+        worker::console_log!(
+            "🔐 AUTH: Found session cookie, length: {}",
+            session_token.len()
+        );
+
+        match session::validate_session_token(db, &session_token).await {
+            Ok(Some((_session, user))) => {
+                worker::console_log!(
+                    "🔐 AUTH: ✅ Session validated successfully for user: {}",
+                    user.id
+                );
+                return Ok(user);
+            }
+            Ok(None) => {
+                worker::console_log!(
+                    "🔐 AUTH: ❌ Session validation returned None (invalid/expired)"
+                );
+            }
+            Err(e) => {
+                worker::console_log!("🔐 AUTH: ❌ Session validation error: {}", e.to_string());
+                return Err(ApiError::DatabaseError(e.to_string()));
+            }
         }
+    } else {
+        worker::console_log!("🔐 AUTH: No session cookie found");
     }
 
     // Then try Bearer token
     if let Some(auth_header) = headers.get("authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if let Some(auth_token) = tokens::validate_access_token(db, token)
-                    .await
-                    .map_err(|e| ApiError::DatabaseError(e.to_string()))?
-                {
-                    // Get user from token
-                    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
-                        .bind(&auth_token.user_id)
-                        .fetch_one(&mut db.conn)
-                        .await
-                        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        worker::console_log!("🔐 AUTH: Found Authorization header");
 
-                    return Ok(user);
+        if let Ok(auth_str) = auth_header.to_str() {
+            worker::console_log!(
+                "🔐 AUTH: Auth header format: {}...",
+                &auth_str[..std::cmp::min(20, auth_str.len())]
+            );
+
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                worker::console_log!("🔐 AUTH: Extracted Bearer token, length: {}", token.len());
+
+                match tokens::validate_access_token(db, token).await {
+                    Ok(Some(auth_token)) => {
+                        worker::console_log!(
+                            "🔐 AUTH: ✅ Bearer token validated for user: {}",
+                            auth_token.user_id
+                        );
+
+                        // Get user from token
+                        match query_as::<User>("SELECT * FROM users WHERE id = ?")
+                            .bind(&auth_token.user_id)
+                            .fetch_one(&mut db.conn)
+                            .await
+                        {
+                            Ok(user) => {
+                                worker::console_log!(
+                                    "🔐 AUTH: ✅ User fetched successfully: {}",
+                                    user.id
+                                );
+                                return Ok(user);
+                            }
+                            Err(e) => {
+                                worker::console_log!(
+                                    "🔐 AUTH: ❌ Failed to fetch user for token: {}",
+                                    e.to_string()
+                                );
+                                return Err(ApiError::DatabaseError(e.to_string()));
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        worker::console_log!(
+                            "🔐 AUTH: ❌ Bearer token validation returned None (invalid/expired)"
+                        );
+                    }
+                    Err(e) => {
+                        worker::console_log!(
+                            "🔐 AUTH: ❌ Bearer token validation error: {}",
+                            e.to_string()
+                        );
+                        return Err(ApiError::DatabaseError(e.to_string()));
+                    }
                 }
+            } else {
+                worker::console_log!("🔐 AUTH: ❌ Authorization header missing 'Bearer ' prefix");
             }
+        } else {
+            worker::console_log!("🔐 AUTH: ❌ Authorization header not valid UTF-8");
         }
+    } else {
+        worker::console_log!("🔐 AUTH: No Authorization header found");
     }
 
+    worker::console_log!("🔐 AUTH: ❌ No valid authentication found - returning Unauthorized");
     Err(ApiError::Unauthorized)
 }
 
