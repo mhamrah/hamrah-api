@@ -930,7 +930,7 @@ pub async fn get_webauthn_challenge(
 
             worker::console_log!(
                 "🛠️ WEBAUTHN/API get_webauthn_challenge: COMPLETE id={}",
-                chal.id
+                response.id
             );
 
             Ok(Json(serde_json::json!({
