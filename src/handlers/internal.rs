@@ -56,23 +56,8 @@ pub struct UserResponse {
 
 /// Middleware to validate internal service calls via service bindings
 /// Service bindings provide automatic authentication - we just log the call
-pub async fn validate_internal_service(headers: &HeaderMap, _env: &Env) -> Result<(), ApiError> {
-    let service_name = headers
-        .get("x-service-name")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("unknown");
-
-    let request_id = headers
-        .get("x-request-id")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("no-id");
-
+pub async fn validate_internal_service(_headers: &HeaderMap, _env: &Env) -> Result<(), ApiError> {
     // Log the service binding call for debugging and tracing
-    console_log!(
-        "Service binding call from: {} (Request ID: {})",
-        service_name,
-        request_id
-    );
 
     // Service bindings automatically authenticate - no manual validation needed
     // The call can only reach us if it's via a valid service binding
@@ -100,7 +85,6 @@ pub async fn validate_client_platform(
 
             // Check if request is from iOS Simulator
             if app_attestation::is_ios_simulator(user_agent) {
-                console_log!("iOS validation: Simulator detected, bypassing App Attestation");
                 return Ok(());
             }
 
@@ -112,7 +96,6 @@ pub async fn validate_client_platform(
             // Validate the attestation token
             app_attestation::validate_app_attestation(attestation_token, env).await?;
 
-            console_log!("iOS validation: App Attestation validation completed");
             Ok(())
         }
         _ => Err(ApiError::ValidationError(
@@ -146,7 +129,7 @@ pub async fn create_user_internal(
 
             // Check if request is from iOS Simulator
             if app_attestation::is_ios_simulator(request.user_agent.as_deref()) {
-                console_log!("iOS validation: Simulator detected, bypassing App Attestation");
+
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
@@ -156,9 +139,6 @@ pub async fn create_user_internal(
                     })?;
 
                 // Validate the attestation token
-                console_log!("iOS App Attestation: Token received, validation ready but temporarily disabled due to Handler trait compilation issue");
-
-                console_log!("iOS validation: App Attestation validation completed");
             }
         }
         _ => {
@@ -169,13 +149,6 @@ pub async fn create_user_internal(
     }
 
     // Log the incoming request for debugging
-    console_log!(
-        "create_user_internal: provider={}, auth_method={}, email={}, platform={}",
-        request.provider,
-        request.auth_method,
-        request.email,
-        request.platform
-    );
 
     // Validate email is present and not empty
     if request.email.trim().is_empty() {
@@ -356,17 +329,13 @@ pub async fn create_tokens_internal(
 
             // Check if request is from iOS Simulator
             if app_attestation::is_ios_simulator(request.user_agent.as_deref()) {
-                console_log!("iOS validation: Simulator detected, bypassing App Attestation");
             } else {
                 // For real devices, require App Attestation
                 let _attestation_token =
                     request.client_attestation.as_deref().ok_or_else(|| {
                         ApiError::ValidationError("iOS App Attestation required".to_string())
                     })?;
-
-                console_log!("iOS App Attestation: Token received, validation currently disabled for compilation compatibility");
             }
-            console_log!("iOS validation: App Attestation validation completed");
         }
         _ => {
             return Err(ApiError::ValidationError(
@@ -376,13 +345,6 @@ pub async fn create_tokens_internal(
     }
 
     // Log the incoming request for debugging
-    console_log!(
-        "create_tokens_internal: provider={}, auth_method={}, email={}, platform={}",
-        request.provider,
-        request.auth_method,
-        request.email,
-        request.platform
-    );
 
     // Validate email is present and not empty
     if request.email.trim().is_empty() {

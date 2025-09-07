@@ -50,12 +50,8 @@ pub fn is_ios_simulator(user_agent: Option<&str>) -> bool {
 
 /// Validates Apple App Attestation token against Apple's service
 pub async fn validate_app_attestation(attestation_token: &str, env: &Env) -> Result<(), ApiError> {
-    console_log!("App Attestation: Starting validation process");
-
     // Parse the attestation token (should be base64 encoded JSON)
     let attestation_data = parse_attestation_token(attestation_token)?;
-
-    console_log!("App Attestation: Token parsed successfully");
 
     // Create JWT for Apple API authentication
     let jwt_token = create_apple_jwt(env).await?;
@@ -63,7 +59,6 @@ pub async fn validate_app_attestation(attestation_token: &str, env: &Env) -> Res
     // Verify against Apple's App Attest service
     verify_with_apple(&attestation_data, &jwt_token).await?;
 
-    console_log!("App Attestation: Successfully validated with Apple");
     Ok(())
 }
 
@@ -90,10 +85,6 @@ fn parse_attestation_token(token: &str) -> Result<AttestationPayload, ApiError> 
             ApiError::ValidationError("Invalid attestation token structure".to_string())
         })?;
 
-    console_log!(
-        "App Attestation: Token parsed successfully, key_id: {}",
-        attestation_payload.key_id
-    );
     Ok(attestation_payload)
 }
 
@@ -120,15 +111,11 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
         .map_err(|_| ApiError::ValidationError("APPLE_PRIVATE_KEY not configured".to_string()))?
         .to_string();
 
-    console_log!("App Attestation: Environment variables loaded successfully");
-
     // Parse the private key using jwt-simple
     let key_pair = ES256KeyPair::from_pem(&private_key).map_err(|e| {
         console_log!("App Attestation: Failed to parse private key: {}", e);
         ApiError::ValidationError("Invalid private key format".to_string())
     })?;
-
-    console_log!("App Attestation: Private key parsed successfully");
 
     // Create JWT claims
     let claims = AppAttestJWTClaims {
@@ -144,7 +131,6 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
         ApiError::ValidationError("Failed to sign JWT token".to_string())
     })?;
 
-    console_log!("App Attestation: JWT created successfully with jwt-simple");
     Ok(token)
 }
 
@@ -182,8 +168,6 @@ async fn verify_with_apple(
     let request = Request::new_with_init(verify_url, &init)
         .map_err(|e| ApiError::ValidationError(format!("Request creation failed: {:?}", e)))?;
 
-    console_log!("App Attestation: Sending request to Apple's service");
-
     // Make the request
     let mut response = Fetch::Request(request).send().await.map_err(|e| {
         console_log!("App Attestation: Request failed: {:?}", e);
@@ -191,17 +175,13 @@ async fn verify_with_apple(
     })?;
 
     let status = response.status_code();
-    console_log!("App Attestation: Apple responded with status: {}", status);
 
     if status == 200 {
         // Parse successful response
-        let response_text = response
+        let _ = response
             .text()
             .await
             .map_err(|e| ApiError::ValidationError(format!("Failed to read response: {:?}", e)))?;
-
-        console_log!("App Attestation: Apple verification successful");
-        console_log!("App Attestation: Response: {}", response_text);
 
         Ok(())
     } else {

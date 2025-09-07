@@ -171,11 +171,7 @@ pub async fn native_auth_endpoint(
     use uuid::Uuid;
     use worker::console_log;
 
-    console_log!(
-        "🔍 Native auth request received: provider={}, email={:?}",
-        request.provider,
-        request.email
-    );
+    // removed non-error log
 
     // Get user agent for platform detection
     let user_agent = headers
@@ -183,7 +179,7 @@ pub async fn native_auth_endpoint(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("unknown");
 
-    console_log!("🔍 User-Agent: {}", user_agent);
+    // removed non-error log
 
     // Determine platform from user agent or X-Requested-With header
     let platform = if let Some(requested_with) = headers.get("X-Requested-With") {
@@ -202,7 +198,7 @@ pub async fn native_auth_endpoint(
         "api".to_string()
     };
 
-    console_log!("🔍 Detected platform: {}", platform);
+    // removed non-error log
 
     // TODO: Verify the OAuth credential with the provider
     // For now, we'll skip verification and trust the client
@@ -212,7 +208,7 @@ pub async fn native_auth_endpoint(
 
     // Extract email from request or use a placeholder
     let email = request.email.as_deref().unwrap_or("unknown@example.com");
-    console_log!("🔍 Using email: {}", email);
+    // removed non-error log
 
     // Find or create user
     let existing_user = query_as::<User>("SELECT * FROM users WHERE email = ?")
@@ -225,7 +221,7 @@ pub async fn native_auth_endpoint(
         })?;
 
     let user_id = if let Some(user) = existing_user {
-        console_log!("✅ Found existing user: {}", user.id);
+        // removed non-error log
 
         // Update last login information
         query("UPDATE users SET last_login_at = ?, last_login_platform = ? WHERE id = ?")
@@ -245,7 +241,7 @@ pub async fn native_auth_endpoint(
         let new_user_id = Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        console_log!("🔍 Creating new user: {}", new_user_id);
+        // removed non-error log
 
         query(
             r#"
@@ -275,7 +271,7 @@ pub async fn native_auth_endpoint(
             ApiError::DatabaseError(e.to_string())
         })?;
 
-        console_log!("✅ Created new user: {}", new_user_id);
+        // removed non-error log
         new_user_id
     };
 
@@ -293,7 +289,7 @@ pub async fn native_auth_endpoint(
         ApiError::DatabaseError(e.to_string())
     })?;
 
-    console_log!("✅ Created token pair for user: {}", user_id);
+    // removed non-error log
 
     // Get updated user information
     let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
@@ -317,11 +313,7 @@ pub async fn native_auth_endpoint(
     let expires_in =
         ((token_pair.access_expires_at - datetime_to_timestamp(Utc::now())) / 1000).max(0);
 
-    console_log!(
-        "✅ Native auth successful for user: {}, expires_in: {}",
-        user_response.email,
-        expires_in
-    );
+    // removed non-error log
 
     Ok(Json(AuthResponse {
         success: true,
@@ -375,11 +367,7 @@ pub async fn app_attestation_challenge(
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<AttestationChallengeRequest>,
 ) -> ApiResult<Json<AttestationChallengeResponse>> {
-    console_log!(
-        "🔐 App Attestation challenge request: platform={}, bundle_id={}",
-        request.platform,
-        request.bundle_id
-    );
+    // removed non-error log
 
     // Validate request
     if request.platform != "ios" {
@@ -397,7 +385,7 @@ pub async fn app_attestation_challenge(
     let is_simulator = app_attestation::is_ios_simulator(user_agent);
 
     if is_simulator {
-        console_log!("🔧 Simulator detected - returning dummy challenge");
+        // removed non-error log
 
         // Return a dummy challenge for simulator
         let challenge_id = uuid::Uuid::new_v4().to_string();
@@ -438,11 +426,7 @@ pub async fn app_attestation_challenge(
         ApiError::DatabaseError(e.to_string())
     })?;
 
-    console_log!(
-        "✅ Generated challenge: id={}, length={}",
-        challenge_id,
-        challenge_base64.len()
-    );
+    // removed non-error log
 
     Ok(Json(AttestationChallengeResponse {
         success: true,
@@ -458,11 +442,7 @@ pub async fn app_attestation_verify(
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<AttestationVerifyRequest>,
 ) -> ApiResult<Json<AttestationVerifyResponse>> {
-    console_log!(
-        "🔐 App Attestation verify request: challenge_id={}, key_id={}",
-        request.challenge_id,
-        request.key_id
-    );
+    // removed non-error log
 
     // Check if this is a simulator request
     let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
@@ -470,7 +450,7 @@ pub async fn app_attestation_verify(
     let is_simulator = app_attestation::is_ios_simulator(user_agent);
 
     if is_simulator {
-        console_log!("🔧 Simulator detected - skipping Apple verification");
+        // removed non-error log
 
         // Clean up challenge record
         use sqlx_d1::query;
@@ -543,7 +523,7 @@ pub async fn app_attestation_verify(
 
     // TODO: Validate with Apple's App Attest service when env is available
     // For now, accept all attestations for testing
-    console_log!("✅ App Attestation verification successful (dev mode)");
+    // removed non-error log
 
     // Clean up challenge record
     use sqlx_d1::query;
