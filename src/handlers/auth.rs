@@ -31,6 +31,9 @@ pub struct UserResponse {
     pub picture: Option<String>,
     pub auth_method: Option<String>,
     pub created_at: String,
+    pub provider: Option<String>,
+    #[serde(rename = "providerId")]
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +72,8 @@ pub async fn validate_session(
                 picture: user.picture,
                 auth_method: user.auth_method,
                 created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
+                provider: user.provider,
+                provider_id: user.provider_id,
             };
 
             return Ok(Json(AuthResponse {
@@ -308,6 +313,8 @@ pub async fn native_auth_endpoint(
         picture: user.picture,
         auth_method: user.auth_method,
         created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
+        provider: user.provider,
+        provider_id: user.provider_id,
     };
 
     let expires_in =
