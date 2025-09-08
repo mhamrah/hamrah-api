@@ -177,6 +177,8 @@ pub async fn get_current_user(
         picture: user.picture,
         auth_method: user.auth_method,
         created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
+        provider: user.provider,
+        provider_id: user.provider_id,
     };
 
     Ok(Json(user_response))
@@ -201,6 +203,8 @@ pub async fn get_user_by_id(
         picture: current_user.picture,
         auth_method: current_user.auth_method,
         created_at: timestamp_to_datetime(current_user.created_at).to_rfc3339(),
+        provider: current_user.provider,
+        provider_id: current_user.provider_id,
     };
 
     Ok(Json(user_response))
@@ -248,6 +252,8 @@ pub async fn update_current_user(
         picture: updated_user.picture,
         auth_method: updated_user.auth_method,
         created_at: timestamp_to_datetime(updated_user.created_at).to_rfc3339(),
+        provider: updated_user.provider,
+        provider_id: updated_user.provider_id,
     };
 
     Ok(Json(user_response))
