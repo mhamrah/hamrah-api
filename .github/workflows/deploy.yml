@@ -1,65 +1,61 @@
-# .github/workflows/deploy.yml
-
+hamrah-api/.github/workflows/deploy.yml
+```
 name: Deploy Workers to Cloudflare
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push events but only for the "main" branch
   push:
-    branches: ["main"]
-
-  # Triggers the workflow on pull request events targeted at the "main" branch
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # Job for detecting changes to determine what to build/test/deploy
   detect-changes:
+    name: Detect Worker Changes
     runs-on: ubuntu-latest
     outputs:
-      api: ${{ steps.changes.outputs.api }}
-      pipeline: ${{ steps.changes.outputs.pipeline }}
-      shared: ${{ steps.changes.outputs.shared }}
+      api: ${{ steps.api.outputs.changed }}
+      pipeline: ${{ steps.pipeline.outputs.changed }}
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # Need previous commit for comparison
+          fetch-depth: 2
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-
-      - name: Detect Changes 🔍
-        id: changes
+      - name: Detect API Worker Changes
+        id: api
         run: |
-          npm install --production
-          node scripts/detect-changes.js
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^workers/api/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
 
-  # Job for testing and linting Rust API worker (runs only if API changed)
+      - name: Detect Pipeline Worker Changes
+        id: pipeline
+        run: |
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^workers/link-pipeline/'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
   test-api:
+    name: Test Rust API Worker
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.api == 'true'
-
     env:
       CARGO_TERM_COLOR: always
-
     steps:
-      # 1. Checkout repository code
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Rust toolchain
-      - name: Setup Rust Toolchain 🦀
+      - name: Setup Rust Toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
 
-      # 3. Cache Rust dependencies for faster builds
-      - name: Cache Cargo Dependencies 💾
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -70,63 +66,69 @@ jobs:
             workers/api/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
-      # 4. Check formatting
-      - name: Check Formatting 📝
+      - name: Check formatting
         run: cd workers/api && cargo fmt -- --check
 
-      # 5. Run Clippy for linting (fail on warnings)
-      - name: Run Linter (Clippy) 📎
+      - name: Run Clippy (fail on warnings)
         run: cd workers/api && cargo clippy -- -D warnings
 
-      # 6. Run tests
-      - name: Run Tests 🧪
+      - name: Run tests
         run: cd workers/api && cargo test --verbose
 
-  # Job for testing TypeScript Pipeline worker (runs only if Pipeline changed)
+      - name: Upload API build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-target
+          path: workers/api/target
+
   test-pipeline:
+    name: Test Link Pipeline Worker
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.pipeline == 'true'
-
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 🟢
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: "npm"
           cache-dependency-path: "workers/link-pipeline/package-lock.json"
 
-      - name: Install Dependencies 📦
+      - name: Install dependencies
         run: cd workers/link-pipeline && npm ci
 
-      - name: Type Check 🔍
+      - name: Type check
         run: cd workers/link-pipeline && npm run type-check
 
-      - name: Build 🔨
+      - name: Build
         run: cd workers/link-pipeline && npm run build
 
-  # Job for preview deployment of API worker (runs only on PRs with API changes)
+      - name: Upload Pipeline build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-dist
+          path: workers/link-pipeline/dist
+
   deploy-api-preview:
+    name: Deploy API Worker Preview
     runs-on: ubuntu-latest
     needs: [detect-changes, test-api]
     if: github.event_name == 'pull_request' && needs.detect-changes.outputs.api == 'true'
-
     env:
       CARGO_TERM_COLOR: always
-
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust Toolchain 🦀
+      - name: Setup Rust Toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
 
-      - name: Cache Cargo Dependencies 💾
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -137,12 +139,16 @@ jobs:
             workers/api/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
-      # Install worker-build if not cached
-      - name: Install worker-build 🔧
+      - name: Download API build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: api-target
+          path: workers/api/target
+
+      - name: Install worker-build if needed
         run: which worker-build || cargo install -q worker-build
 
-      # Deploy API to preview environment
-      - name: Deploy API Preview 🚀
+      - name: Deploy API Preview
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -150,31 +156,32 @@ jobs:
           command: deploy --config wrangler.preview.toml
           workingDirectory: workers/api
 
-  # Job for preview deployment of Pipeline worker (runs only on PRs with Pipeline changes)
   deploy-pipeline-preview:
+    name: Deploy Pipeline Worker Preview
     runs-on: ubuntu-latest
     needs: [detect-changes, test-pipeline]
     if: github.event_name == 'pull_request' && needs.detect-changes.outputs.pipeline == 'true'
-
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 🟢
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: "npm"
           cache-dependency-path: "workers/link-pipeline/package-lock.json"
 
-      - name: Install Dependencies 📦
+      - name: Install dependencies
         run: cd workers/link-pipeline && npm ci
 
-      - name: Build Pipeline 🔨
-        run: cd workers/link-pipeline && npm run build
+      - name: Download Pipeline build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-dist
+          path: workers/link-pipeline/dist
 
-      # Deploy Pipeline to preview environment
-      - name: Deploy Pipeline Preview 🚀
+      - name: Deploy Pipeline Preview
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -182,25 +189,23 @@ jobs:
           command: deploy --env preview
           workingDirectory: workers/link-pipeline
 
-  # Job for production deployment of API worker (runs only on main branch push with API changes)
   deploy-api-production:
+    name: Deploy API Worker Production
     runs-on: ubuntu-latest
     needs: [detect-changes, test-api]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.api == 'true'
-
     env:
       CARGO_TERM_COLOR: always
-
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust Toolchain 🦀
+      - name: Setup Rust Toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
 
-      - name: Cache Cargo Dependencies 💾
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -211,12 +216,16 @@ jobs:
             workers/api/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
-      # Install worker-build if not cached
-      - name: Install worker-build 🔧
+      - name: Download API build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: api-target
+          path: workers/api/target
+
+      - name: Install worker-build if needed
         run: which worker-build || cargo install -q worker-build
 
-      # Deploy API to production
-      - name: Deploy API Production 🚀
+      - name: Deploy API Production
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -224,31 +233,32 @@ jobs:
           command: deploy
           workingDirectory: workers/api
 
-  # Job for production deployment of Pipeline worker (runs only on main branch push with Pipeline changes)
   deploy-pipeline-production:
+    name: Deploy Pipeline Worker Production
     runs-on: ubuntu-latest
     needs: [detect-changes, test-pipeline]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.pipeline == 'true'
-
     steps:
-      - name: Checkout 🛎️
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 🟢
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "18"
           cache: "npm"
           cache-dependency-path: "workers/link-pipeline/package-lock.json"
 
-      - name: Install Dependencies 📦
+      - name: Install dependencies
         run: cd workers/link-pipeline && npm ci
 
-      - name: Build Pipeline 🔨
-        run: cd workers/link-pipeline && npm run build
+      - name: Download Pipeline build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-dist
+          path: workers/link-pipeline/dist
 
-      # Deploy Pipeline to production
-      - name: Deploy Pipeline Production 🚀
+      - name: Deploy Pipeline Production
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
