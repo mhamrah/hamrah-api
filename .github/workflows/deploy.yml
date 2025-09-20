@@ -1,6 +1,4 @@
-hamrah-api/.github/workflows/deploy.yml
-```
-name: Deploy Workers to Cloudflare
+name: Cloudflare Workers CI/CD
 
 on:
   push:
