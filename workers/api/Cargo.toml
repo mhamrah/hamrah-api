@@ -18,6 +18,7 @@ axum = { version = "0.8", default-features = false, features = [
     "http1",
     "query",
     "matched-path",
+    "tokio",
 ] }
 tower-service = "0.3.3"
 console_error_panic_hook = { version = "0.1.7" }
@@ -31,6 +32,7 @@ hex = "0.4"
 # Moved rand to target-specific sections to control getrandom features
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
+futures-util = "0.3"
 thiserror = "1.0"
 # SQLx is only needed for non-WASM targets (development/testing)
 # Production WASM builds use sqlx-d1 directly
@@ -49,6 +51,8 @@ p256 = { version = "0.13", features = ["ecdsa", "pem"], default-features = false
 ecdsa = { version = "0.16", features = ["pem"], default-features = false }
 # Alternative: use web-sys for browser crypto APIs
 web-sys = { version = "0.3", features = ["SubtleCrypto", "CryptoKey"] }
+url = "2.5.7"
+serde_urlencoded = "0.7.1"
 # WebAuthn-rs removed - WebAuthn protocol handled in web layer only
 
 [dev-dependencies]

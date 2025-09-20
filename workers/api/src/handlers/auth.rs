@@ -1,6 +1,6 @@
-use super::{ApiError, ApiResult};
 use crate::auth::{app_attestation, cookies, session, tokens};
 use crate::db::Database;
+use crate::error::{AppError, AppResult};
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{
     extract::{Path, State},
@@ -59,11 +59,11 @@ pub struct NativeAuthRequest {
 pub async fn validate_session(
     State(mut db): State<Database>,
     headers: HeaderMap,
-) -> ApiResult<Json<AuthResponse>> {
+) -> AppResult<Json<AuthResponse>> {
     if let Some(token) = cookies::get_cookie_value(&headers, "session") {
         if let Some((_session, user)) = session::validate_session_token(&mut db, &token)
             .await
-            .map_err(|e| ApiError::DatabaseError(e.to_string()))?
+            .map_err(AppError::from)?
         {
             let user_response = UserResponse {
                 id: user.id,
@@ -86,7 +86,7 @@ pub async fn validate_session(
         }
     }
 
-    Err(ApiError::Unauthorized)
+    Err(AppError::unauthorized("Unauthorized"))
 }
 
 // Token creation is now handled via internal API only
@@ -94,10 +94,10 @@ pub async fn validate_session(
 pub async fn refresh_token_endpoint(
     State(mut db): State<Database>,
     JsonExtractor(request): JsonExtractor<TokenRefreshRequest>,
-) -> ApiResult<Json<AuthResponse>> {
+) -> AppResult<Json<AuthResponse>> {
     if let Some(new_token_pair) = tokens::refresh_token(&mut db, &request.refresh_token)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?
+        .map_err(AppError::from)?
     {
         let expires_in =
             ((new_token_pair.access_expires_at - datetime_to_timestamp(Utc::now())) / 1000).max(0);
@@ -110,14 +110,14 @@ pub async fn refresh_token_endpoint(
             expires_in: Some(expires_in),
         }))
     } else {
-        Err(ApiError::Unauthorized)
+        Err(AppError::unauthorized("Unauthorized"))
     }
 }
 
 pub async fn logout_session(
     State(mut db): State<Database>,
     mut headers: HeaderMap,
-) -> ApiResult<(StatusCode, HeaderMap, Json<serde_json::Value>)> {
+) -> AppResult<(StatusCode, HeaderMap, Json<serde_json::Value>)> {
     if let Some(token) = cookies::get_cookie_value(&headers, "session") {
         let session_id = session::create_session_id(&token);
         let _ = session::invalidate_session(&mut db, &session_id).await;
@@ -139,10 +139,10 @@ pub async fn logout_session(
 pub async fn revoke_token_endpoint(
     State(mut db): State<Database>,
     Path(token_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     tokens::revoke_token(&mut db, &token_id)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -153,10 +153,10 @@ pub async fn revoke_token_endpoint(
 pub async fn revoke_all_user_tokens_endpoint(
     State(mut db): State<Database>,
     Path(user_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     tokens::revoke_all_user_tokens(&mut db, &user_id)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -170,7 +170,7 @@ pub async fn native_auth_endpoint(
     State(mut db): State<Database>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<NativeAuthRequest>,
-) -> ApiResult<Json<AuthResponse>> {
+) -> AppResult<Json<AuthResponse>> {
     use crate::db::schema::User;
     use sqlx_d1::{query, query_as};
     use uuid::Uuid;
@@ -222,7 +222,7 @@ pub async fn native_auth_endpoint(
         .await
         .map_err(|e| {
             console_log!("❌ Database error finding user: {}", e);
-            ApiError::DatabaseError(e.to_string())
+            AppError::from(e)
         })?;
 
     let user_id = if let Some(user) = existing_user {
@@ -237,7 +237,7 @@ pub async fn native_auth_endpoint(
             .await
             .map_err(|e| {
                 console_log!("❌ Database error updating user login: {}", e);
-                ApiError::DatabaseError(e.to_string())
+                AppError::from(e)
             })?;
 
         user.id
@@ -273,7 +273,7 @@ pub async fn native_auth_endpoint(
         .await
         .map_err(|e| {
             console_log!("❌ Database error creating user: {}", e);
-            ApiError::DatabaseError(e.to_string())
+            AppError::from(e)
         })?;
 
         // removed non-error log
@@ -291,7 +291,7 @@ pub async fn native_auth_endpoint(
     .await
     .map_err(|e| {
         console_log!("❌ Error creating token pair: {}", e);
-        ApiError::DatabaseError(e.to_string())
+        AppError::from(e)
     })?;
 
     // removed non-error log
@@ -303,7 +303,7 @@ pub async fn native_auth_endpoint(
         .await
         .map_err(|e| {
             console_log!("❌ Database error fetching user: {}", e);
-            ApiError::DatabaseError(e.to_string())
+            AppError::from(e)
         })?;
 
     let user_response = UserResponse {
@@ -373,7 +373,7 @@ pub async fn app_attestation_challenge(
     State(mut db): State<Database>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<AttestationChallengeRequest>,
-) -> ApiResult<Json<AttestationChallengeResponse>> {
+) -> AppResult<Json<AttestationChallengeResponse>> {
     // removed non-error log
 
     // Validate request
@@ -430,7 +430,7 @@ pub async fn app_attestation_challenge(
     .await
     .map_err(|e| {
         console_log!("❌ Database error storing challenge: {}", e);
-        ApiError::DatabaseError(e.to_string())
+        AppError::from(e)
     })?;
 
     // removed non-error log
@@ -448,7 +448,7 @@ pub async fn app_attestation_verify(
     State(mut db): State<Database>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<AttestationVerifyRequest>,
-) -> ApiResult<Json<AttestationVerifyResponse>> {
+) -> AppResult<Json<AttestationVerifyResponse>> {
     // removed non-error log
 
     // Check if this is a simulator request
@@ -490,7 +490,7 @@ pub async fn app_attestation_verify(
     .await
     .map_err(|e| {
         console_log!("❌ Database error fetching challenge: {}", e);
-        ApiError::DatabaseError(e.to_string())
+        AppError::from(e)
     })?;
 
     let _challenge = match stored_challenge {

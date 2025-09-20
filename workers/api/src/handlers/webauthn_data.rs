@@ -2,7 +2,6 @@
 // These endpoints only handle data storage/retrieval for WebAuthn operations
 // The actual WebAuthn protocol logic is handled in hamrah-web
 
-use super::{ApiError, ApiResult};
 use crate::db::schema::{WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
 use axum::{
@@ -16,6 +15,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx_d1::{query, query_as};
 
+use crate::error::{AppError, AppResult};
 use crate::AppState;
 
 // Request/Response types for WebAuthn data operations
@@ -81,7 +81,7 @@ pub struct ChallengeResponse {
 pub async fn store_webauthn_credential(
     State(mut state): State<AppState>,
     JsonExtractor(payload): JsonExtractor<StoreCredentialRequest>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     let now = datetime_to_timestamp(Utc::now());
 
     // Pre-base64 summary log (raw lengths)
@@ -162,10 +162,7 @@ pub async fn store_webauthn_credential(
                 payload.id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to store credential: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 
@@ -185,7 +182,7 @@ pub async fn store_webauthn_credential(
 pub async fn get_webauthn_credential(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API get_webauthn_credential: START id={}",
         credential_id
@@ -202,8 +199,9 @@ pub async fn get_webauthn_credential(
                     credential_id,
                     e
                 );
-                ApiError::DatabaseError(format!("Database error: {:?}", e))
-            })?;
+                format!("Database error: {:?}", e)
+            })
+            .map_err(AppError::from)?;
     let query_end = datetime_to_timestamp(Utc::now());
     worker::console_log!(
         "💽 WEBAUTHN/DB get_webauthn_credential: SUCCESS id={}; found={}; duration_ms={}",
@@ -224,18 +222,16 @@ pub async fn get_webauthn_credential(
                 cred.name.is_some()
             );
             // Convert base64 strings back to Vec<u8>
-            let public_key = BASE64_STANDARD.decode(&cred.public_key).map_err(|e| {
-                ApiError::InternalServerError(format!("Failed to decode public key: {:?}", e))
-            })?;
+            let public_key = BASE64_STANDARD
+                .decode(&cred.public_key)
+                .map_err(|e| format!("Failed to decode public key: {:?}", e))?;
 
             let aaguid = cred
                 .aaguid
                 .as_ref()
                 .map(|a| BASE64_STANDARD.decode(a))
                 .transpose()
-                .map_err(|e| {
-                    ApiError::InternalServerError(format!("Failed to decode aaguid: {:?}", e))
-                })?;
+                .map_err(|e| format!("Failed to decode aaguid: {:?}", e))?;
 
             let transports: Option<Vec<String>> = cred
                 .transports
@@ -268,10 +264,7 @@ pub async fn get_webauthn_credential(
                 "🛠️ WEBAUTHN/API get_webauthn_credential: NOT_FOUND id={}",
                 credential_id
             );
-            Ok(Json(serde_json::json!({
-                "success": false,
-                "error": "Credential not found"
-            })))
+            Err(AppError::not_found("Credential not found"))
         }
     }
 }
@@ -282,7 +275,7 @@ pub async fn get_user_webauthn_credentials(
     State(mut state): State<AppState>,
     Path(user_id): Path<String>,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🔑 WEBAUTHN: Starting get_user_webauthn_credentials for user_id: {}",
         user_id
@@ -321,10 +314,9 @@ pub async fn get_user_webauthn_credentials(
             current_user.id,
             user_id
         );
-        return Ok(Json(serde_json::json!({
-            "success": false,
-            "error": "Unauthorized: cannot access other user's credentials"
-        })));
+        return Err(AppError::forbidden(
+            "Unauthorized: cannot access other user's credentials",
+        ));
     }
 
     worker::console_log!(
@@ -355,7 +347,7 @@ pub async fn get_user_webauthn_credentials(
         }
         Err(e) => {
             worker::console_log!("🔑 WEBAUTHN: ❌ Database query failed: {:?}", e);
-            return Err(ApiError::DatabaseError(format!("Database error: {:?}", e)));
+            return Err(AppError::from(e));
         }
     };
 
@@ -457,7 +449,7 @@ pub async fn update_webauthn_credential_counter(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
     JsonExtractor(payload): JsonExtractor<UpdateCredentialCounterRequest>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API update_webauthn_credential_counter: START id={}; new_counter={}; last_used={}",
         credential_id,
@@ -488,10 +480,7 @@ pub async fn update_webauthn_credential_counter(
                 credential_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to update credential counter: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 
@@ -512,7 +501,7 @@ pub async fn delete_webauthn_credential(
     State(mut state): State<AppState>,
     Path(credential_id): Path<String>,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API delete_webauthn_credential: START id={}",
         credential_id
@@ -567,7 +556,7 @@ pub async fn delete_webauthn_credential(
                 credential_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!("Database error: {:?}", e)));
+            return Err(AppError::from(e));
         }
     };
 
@@ -586,10 +575,9 @@ pub async fn delete_webauthn_credential(
                     current_user.id,
                     cred.user_id
                 );
-                return Ok(Json(serde_json::json!({
-                    "success": false,
-                    "error": "Unauthorized: cannot delete other user's credential"
-                })));
+                return Err(AppError::forbidden(
+                    "Unauthorized: cannot delete other user's credential",
+                ));
             }
         }
         None => {
@@ -597,10 +585,7 @@ pub async fn delete_webauthn_credential(
                 "🛠️ WEBAUTHN/API delete_webauthn_credential: NOT_FOUND id={}",
                 credential_id
             );
-            return Ok(Json(serde_json::json!({
-                "success": false,
-                "error": "Credential not found"
-            })));
+            return Err(AppError::not_found("Credential not found"));
         }
     }
 
@@ -629,10 +614,7 @@ pub async fn delete_webauthn_credential(
                 credential_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to delete credential: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 
@@ -654,7 +636,7 @@ pub async fn update_webauthn_credential_name(
     Path(credential_id): Path<String>,
     headers: HeaderMap,
     JsonExtractor(payload): JsonExtractor<serde_json::Value>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API update_webauthn_credential_name: START id={}",
         credential_id
@@ -687,7 +669,7 @@ pub async fn update_webauthn_credential_name(
     let name = payload
         .get("name")
         .and_then(|n| n.as_str())
-        .ok_or_else(|| ApiError::ValidationError("Name is required".to_string()))?;
+        .ok_or_else(|| AppError::bad_request("Name is required"))?;
     worker::console_log!(
         "🛠️ WEBAUTHN/API update_webauthn_credential_name: NAME_EXTRACTED id={}; new_name_len={}; new_name=\"{}\"",
         credential_id,
@@ -724,7 +706,7 @@ pub async fn update_webauthn_credential_name(
                 credential_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!("Database error: {:?}", e)));
+            return Err(AppError::from(e));
         }
     };
 
@@ -744,10 +726,9 @@ pub async fn update_webauthn_credential_name(
                     current_user.id,
                     cred.user_id
                 );
-                return Ok(Json(serde_json::json!({
-                    "success": false,
-                    "error": "Unauthorized: cannot update other user's credential"
-                })));
+                return Err(AppError::forbidden(
+                    "Unauthorized: cannot update other user's credential",
+                ));
             }
         }
         None => {
@@ -755,10 +736,7 @@ pub async fn update_webauthn_credential_name(
                 "🛠️ WEBAUTHN/API update_webauthn_credential_name: NOT_FOUND id={}",
                 credential_id
             );
-            return Ok(Json(serde_json::json!({
-                "success": false,
-                "error": "Credential not found"
-            })));
+            return Err(AppError::not_found("Credential not found"));
         }
     }
 
@@ -789,10 +767,7 @@ pub async fn update_webauthn_credential_name(
                 credential_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to update credential name: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 
@@ -813,7 +788,7 @@ pub async fn update_webauthn_credential_name(
 pub async fn store_webauthn_challenge(
     State(mut state): State<AppState>,
     JsonExtractor(payload): JsonExtractor<StoreChallengeRequest>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     let now = datetime_to_timestamp(Utc::now());
     worker::console_log!(
         "🛠️ WEBAUTHN/API store_webauthn_challenge: START id={}; type={}; user_id_present={}; expires_at={}",
@@ -852,10 +827,7 @@ pub async fn store_webauthn_challenge(
                 payload.id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to store challenge: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 
@@ -875,7 +847,7 @@ pub async fn store_webauthn_challenge(
 pub async fn get_webauthn_challenge(
     State(mut state): State<AppState>,
     Path(challenge_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API get_webauthn_challenge: START id={}",
         challenge_id
@@ -905,7 +877,7 @@ pub async fn get_webauthn_challenge(
                 challenge_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!("Database error: {:?}", e)));
+            return Err(AppError::from(e));
         }
     };
 
@@ -943,10 +915,7 @@ pub async fn get_webauthn_challenge(
                 "🛠️ WEBAUTHN/API get_webauthn_challenge: NOT_FOUND id={}",
                 challenge_id
             );
-            Ok(Json(serde_json::json!({
-                "success": false,
-                "error": "Challenge not found"
-            })))
+            Err(AppError::not_found("Challenge not found"))
         }
     }
 }
@@ -956,7 +925,7 @@ pub async fn get_webauthn_challenge(
 pub async fn delete_webauthn_challenge(
     State(mut state): State<AppState>,
     Path(challenge_id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
         "🛠️ WEBAUTHN/API delete_webauthn_challenge: START id={}",
         challenge_id
@@ -982,10 +951,7 @@ pub async fn delete_webauthn_challenge(
                 challenge_id,
                 e
             );
-            return Err(ApiError::DatabaseError(format!(
-                "Failed to delete challenge: {:?}",
-                e
-            )));
+            return Err(AppError::from(e));
         }
     }
 

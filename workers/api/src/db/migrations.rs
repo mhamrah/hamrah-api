@@ -219,6 +219,180 @@ impl Migration for AppAttestationMigration {
     }
 }
 
+pub struct PipelineMigration;
+
+impl Migration for PipelineMigration {
+    fn version(&self) -> &'static str {
+        "003"
+    }
+
+    fn name(&self) -> &'static str {
+        "pipeline_tables"
+    }
+
+    fn up(&self) -> &'static str {
+        r#"
+        CREATE TABLE links (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            client_id TEXT,
+            original_url TEXT NOT NULL,
+            canonical_url TEXT NOT NULL,
+            host TEXT,
+            state TEXT NOT NULL,
+            failure_reason TEXT,
+            title TEXT,
+            description TEXT,
+            site_name TEXT,
+            favicon_url TEXT,
+            image_url TEXT,
+            summary_short TEXT,
+            summary_long TEXT,
+            primary_summary_model_id TEXT,
+            lang TEXT,
+            word_count INTEGER,
+            reading_time_sec INTEGER,
+            content_hash TEXT,
+            archive_etag TEXT,
+            archive_bytes INTEGER,
+            archive_r2_key TEXT,
+            save_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            ready_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE link_saves (
+            id TEXT PRIMARY KEY,
+            link_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            source_app TEXT,
+            shared_text TEXT,
+            shared_at TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE tags (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE
+        );
+
+        CREATE TABLE link_tags (
+            link_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            confidence REAL,
+            PRIMARY KEY (link_id, tag_id),
+            FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE link_summaries (
+            id TEXT PRIMARY KEY,
+            link_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            prompt_version TEXT,
+            prompt_text TEXT NOT NULL,
+            short_summary TEXT NOT NULL,
+            long_summary TEXT,
+            tags_json TEXT,
+            usage_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE push_tokens (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            device_token TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(device_token),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE user_prefs (
+            user_id TEXT PRIMARY KEY,
+            preferred_models TEXT,
+            summary_models TEXT,
+            summary_prompt_override TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE idempotency_keys (
+            key TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            response_body BLOB,
+            status INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX links_user_updated_idx ON links(user_id, updated_at);
+        CREATE INDEX links_canonical_idx ON links(canonical_url);
+        CREATE INDEX link_saves_link_idx ON link_saves(link_id);
+        CREATE INDEX link_summaries_link_idx ON link_summaries(link_id);
+        CREATE INDEX push_tokens_user_idx ON push_tokens(user_id);
+        "#
+    }
+
+    fn down(&self) -> &'static str {
+        r#"
+        DROP INDEX IF EXISTS push_tokens_user_idx;
+        DROP INDEX IF EXISTS link_summaries_link_idx;
+        DROP INDEX IF EXISTS link_saves_link_idx;
+        DROP INDEX IF EXISTS links_canonical_idx;
+        DROP INDEX IF EXISTS links_user_updated_idx;
+
+        DROP TABLE IF EXISTS idempotency_keys;
+        DROP TABLE IF EXISTS user_prefs;
+        DROP TABLE IF EXISTS push_tokens;
+        DROP TABLE IF EXISTS link_summaries;
+        DROP TABLE IF EXISTS link_tags;
+        DROP TABLE IF EXISTS tags;
+        DROP TABLE IF EXISTS link_saves;
+        DROP TABLE IF EXISTS links;
+        "#
+    }
+}
+
+pub struct SoftDeleteMigration;
+
+impl Migration for SoftDeleteMigration {
+    fn version(&self) -> &'static str {
+        "004"
+    }
+
+    fn name(&self) -> &'static str {
+        "soft_delete_links"
+    }
+
+    fn up(&self) -> &'static str {
+        r#"
+        ALTER TABLE links ADD COLUMN deleted_at TEXT;
+        CREATE INDEX links_user_deleted_idx ON links(user_id, deleted_at);
+        "#
+    }
+
+    fn down(&self) -> &'static str {
+        r#"
+        DROP INDEX IF EXISTS links_user_deleted_idx;
+        "#
+    }
+}
+
 pub fn get_migrations() -> Vec<&'static dyn Migration> {
-    vec![&InitialMigration, &AppAttestationMigration]
+    vec![
+        &InitialMigration,
+        &AppAttestationMigration,
+        &PipelineMigration,
+        &SoftDeleteMigration,
+    ]
 }

@@ -53,24 +53,6 @@ The API handles all database operations and provides secure authentication endpo
 - `GET /api/users/me/tokens` - List user's active tokens
 - `GET /api/users/:user_id` - Get user by ID
 
-## Development Commands
-
-```bash
-# Build the project (requires cargo in PATH or use full path)
-/Users/mhamrah/.cargo/bin/cargo build
-
-# Run tests
-/Users/mhamrah/.cargo/bin/cargo test
-
-# Check code formatting
-/Users/mhamrah/.cargo/bin/cargo fmt --check
-
-# Run clippy for linting
-/Users/mhamrah/.cargo/bin/cargo clippy
-
-# Build for WASM target (for Cloudflare Workers)
-/Users/mhamrah/.cargo/bin/cargo build --target wasm32-unknown-unknown --release
-```
 
 ## Key Technologies
 
@@ -88,7 +70,7 @@ The API handles all database operations and provides secure authentication endpo
 ### Users Table
 Stores user account information with OAuth provider details.
 
-### Sessions Table  
+### Sessions Table
 Manages web application session tokens with expiration.
 
 ### Auth Tokens Table
@@ -101,7 +83,7 @@ Handles API access/refresh tokens for mobile applications with platform tracking
 ## Security Features
 
 - **Internal Service Authentication**: X-Internal-Service and X-Internal-Key headers
-- **iOS App Attestation**: Validates authentic iOS client requests  
+- **iOS App Attestation**: Validates authentic iOS client requests
 - **JWT Token Management**: Secure access/refresh token pairs
 - **WebAuthn Support**: Passwordless authentication with passkeys
 - **CORS Configuration**: Restricted to authorized origins

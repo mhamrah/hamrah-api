@@ -1,3 +1,31 @@
-target
-node_modules
-.wrangler
+# Rust
+workers/api/target/
+workers/api/build/
+
+# Node.js
+node_modules/
+workers/link-pipeline/node_modules/
+workers/link-pipeline/dist/
+package-lock.json
+workers/link-pipeline/package-lock.json
+
+# Wrangler
+.wrangler/
+workers/api/.wrangler/
+workers/link-pipeline/.wrangler/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+target/

@@ -1,6 +1,6 @@
 # .github/workflows/deploy.yml
 
-name: Deploy Rust Worker to Cloudflare
+name: Deploy Workers to Cloudflare
 
 # Controls when the workflow will run
 on:
@@ -14,10 +14,36 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # Job for testing and linting (runs on all events)
-  test:
+  # Job for detecting changes to determine what to build/test/deploy
+  detect-changes:
     runs-on: ubuntu-latest
-    
+    outputs:
+      api: ${{ steps.changes.outputs.api }}
+      pipeline: ${{ steps.changes.outputs.pipeline }}
+      shared: ${{ steps.changes.outputs.shared }}
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Need previous commit for comparison
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Detect Changes 🔍
+        id: changes
+        run: |
+          npm install --production
+          node scripts/detect-changes.js
+
+  # Job for testing and linting Rust API worker (runs only if API changed)
+  test-api:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.api == 'true'
+
     env:
       CARGO_TERM_COLOR: always
 
@@ -31,7 +57,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      
+
       # 3. Cache Rust dependencies for faster builds
       - name: Cache Cargo Dependencies 💾
         uses: actions/cache@v4
@@ -41,27 +67,53 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            workers/api/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
       # 4. Check formatting
       - name: Check Formatting 📝
-        run: cargo fmt -- --check
+        run: cd workers/api && cargo fmt -- --check
 
       # 5. Run Clippy for linting (fail on warnings)
       - name: Run Linter (Clippy) 📎
-        run: cargo clippy -- -D warnings
+        run: cd workers/api && cargo clippy -- -D warnings
 
       # 6. Run tests
       - name: Run Tests 🧪
-        run: cargo test --verbose
+        run: cd workers/api && cargo test --verbose
 
-  # Job for preview deployment (runs only on PRs)
-  deploy-preview:
+  # Job for testing TypeScript Pipeline worker (runs only if Pipeline changed)
+  test-pipeline:
     runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'pull_request'
-    
+    needs: detect-changes
+    if: needs.detect-changes.outputs.pipeline == 'true'
+
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 🟢
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "workers/link-pipeline/package-lock.json"
+
+      - name: Install Dependencies 📦
+        run: cd workers/link-pipeline && npm ci
+
+      - name: Type Check 🔍
+        run: cd workers/link-pipeline && npm run type-check
+
+      - name: Build 🔨
+        run: cd workers/link-pipeline && npm run build
+
+  # Job for preview deployment of API worker (runs only on PRs with API changes)
+  deploy-api-preview:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-api]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.api == 'true'
+
     env:
       CARGO_TERM_COLOR: always
 
@@ -73,7 +125,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      
+
       - name: Cache Cargo Dependencies 💾
         uses: actions/cache@v4
         with:
@@ -82,27 +134,60 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            workers/api/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
       # Install worker-build if not cached
       - name: Install worker-build 🔧
         run: which worker-build || cargo install -q worker-build
 
-      # Deploy to preview environment
-      - name: Deploy Preview 🚀
+      # Deploy API to preview environment
+      - name: Deploy API Preview 🚀
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --config wrangler.preview.toml
+          workingDirectory: workers/api
 
-  # Job for production deployment (runs only on main branch push)
-  deploy-production:
+  # Job for preview deployment of Pipeline worker (runs only on PRs with Pipeline changes)
+  deploy-pipeline-preview:
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
+    needs: [detect-changes, test-pipeline]
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.pipeline == 'true'
+
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 🟢
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "workers/link-pipeline/package-lock.json"
+
+      - name: Install Dependencies 📦
+        run: cd workers/link-pipeline && npm ci
+
+      - name: Build Pipeline 🔨
+        run: cd workers/link-pipeline && npm run build
+
+      # Deploy Pipeline to preview environment
+      - name: Deploy Pipeline Preview 🚀
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env preview
+          workingDirectory: workers/link-pipeline
+
+  # Job for production deployment of API worker (runs only on main branch push with API changes)
+  deploy-api-production:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-api]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.api == 'true'
+
     env:
       CARGO_TERM_COLOR: always
 
@@ -114,7 +199,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      
+
       - name: Cache Cargo Dependencies 💾
         uses: actions/cache@v4
         with:
@@ -123,17 +208,50 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            workers/api/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('workers/api/Cargo.lock') }}
 
       # Install worker-build if not cached
       - name: Install worker-build 🔧
         run: which worker-build || cargo install -q worker-build
 
-      # Deploy to production
-      - name: Deploy Production 🚀
+      # Deploy API to production
+      - name: Deploy API Production 🚀
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --config wrangler.toml
+          command: deploy
+          workingDirectory: workers/api
+
+  # Job for production deployment of Pipeline worker (runs only on main branch push with Pipeline changes)
+  deploy-pipeline-production:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-pipeline]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.pipeline == 'true'
+
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 🟢
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: "workers/link-pipeline/package-lock.json"
+
+      - name: Install Dependencies 📦
+        run: cd workers/link-pipeline && npm ci
+
+      - name: Build Pipeline 🔨
+        run: cd workers/link-pipeline && npm run build
+
+      # Deploy Pipeline to production
+      - name: Deploy Pipeline Production 🚀
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+          workingDirectory: workers/link-pipeline

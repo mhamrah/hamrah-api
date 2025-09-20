@@ -1,4 +1,3 @@
-use crate::handlers::ApiError;
 use jwt_simple::prelude::*;
 use serde::{Deserialize, Serialize};
 use worker::{console_log, Env, Fetch, Method, Request, RequestInit};
@@ -49,7 +48,7 @@ pub fn is_ios_simulator(user_agent: Option<&str>) -> bool {
 }
 
 /// Validates Apple App Attestation token against Apple's service
-pub async fn validate_app_attestation(attestation_token: &str, env: &Env) -> Result<(), ApiError> {
+pub async fn validate_app_attestation(attestation_token: &str, env: &Env) -> Result<(), String> {
     // Parse the attestation token (should be base64 encoded JSON)
     let attestation_data = parse_attestation_token(attestation_token)?;
 
@@ -63,7 +62,7 @@ pub async fn validate_app_attestation(attestation_token: &str, env: &Env) -> Res
 }
 
 /// Parse and validate the attestation token format
-fn parse_attestation_token(token: &str) -> Result<AttestationPayload, ApiError> {
+fn parse_attestation_token(token: &str) -> Result<AttestationPayload, String> {
     use base64::Engine;
 
     // Parse the attestation token (should be base64 encoded JSON)
@@ -71,50 +70,48 @@ fn parse_attestation_token(token: &str) -> Result<AttestationPayload, ApiError> 
         .decode(token)
         .map_err(|_| {
             console_log!("App Attestation: Invalid base64 token");
-            ApiError::ValidationError("Invalid attestation token format".to_string())
+            "Invalid attestation token format".to_string()
         })?;
 
     let attestation_json = String::from_utf8(attestation_data).map_err(|_| {
         console_log!("App Attestation: Invalid UTF-8 in token");
-        ApiError::ValidationError("Invalid attestation token encoding".to_string())
+        "Invalid attestation token encoding".to_string()
     })?;
 
-    let attestation_payload: AttestationPayload =
-        serde_json::from_str(&attestation_json).map_err(|e| {
-            console_log!("App Attestation: Failed to parse JSON: {}", e);
-            ApiError::ValidationError("Invalid attestation token structure".to_string())
-        })?;
-
-    Ok(attestation_payload)
+    let payload: AttestationPayload = serde_json::from_str(&attestation_json).map_err(|e| {
+        console_log!("App Attestation: Failed to parse JSON: {}", e);
+        "Invalid attestation token structure".to_string()
+    })?;
+    Ok(payload)
 }
 
 /// Creates a JWT token for authenticating with Apple's App Attest API using jwt-simple
-async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
+async fn create_apple_jwt(env: &Env) -> Result<String, String> {
     // Get required environment variables
     let bundle_id = env
         .var("APPLE_BUNDLE_ID")
-        .map_err(|_| ApiError::ValidationError("APPLE_BUNDLE_ID not configured".to_string()))?
+        .map_err(|_| "APPLE_BUNDLE_ID not configured".to_string())?
         .to_string();
 
     let team_id = env
         .var("APPLE_TEAM_ID")
-        .map_err(|_| ApiError::ValidationError("APPLE_TEAM_ID not configured".to_string()))?
+        .map_err(|_| "APPLE_TEAM_ID not configured".to_string())?
         .to_string();
 
     let _key_id = env
         .var("APPLE_KEY_ID")
-        .map_err(|_| ApiError::ValidationError("APPLE_KEY_ID not configured".to_string()))?
+        .map_err(|_| "APPLE_KEY_ID not configured".to_string())?
         .to_string();
 
     let private_key = env
         .var("APPLE_PRIVATE_KEY")
-        .map_err(|_| ApiError::ValidationError("APPLE_PRIVATE_KEY not configured".to_string()))?
+        .map_err(|_| "APPLE_PRIVATE_KEY not configured".to_string())?
         .to_string();
 
     // Parse the private key using jwt-simple
     let key_pair = ES256KeyPair::from_pem(&private_key).map_err(|e| {
         console_log!("App Attestation: Failed to parse private key: {}", e);
-        ApiError::ValidationError("Invalid private key format".to_string())
+        "Invalid private key format".to_string()
     })?;
 
     // Create JWT claims
@@ -128,7 +125,7 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
     let claims_with_expiry = Claims::with_custom_claims(claims, Duration::from_hours(1));
     let token = key_pair.sign(claims_with_expiry).map_err(|e| {
         console_log!("App Attestation: Failed to sign JWT: {}", e);
-        ApiError::ValidationError("Failed to sign JWT token".to_string())
+        "Failed to sign JWT token".to_string()
     })?;
 
     Ok(token)
@@ -138,7 +135,7 @@ async fn create_apple_jwt(env: &Env) -> Result<String, ApiError> {
 async fn verify_with_apple(
     attestation: &AttestationPayload,
     jwt_token: &str,
-) -> Result<(), ApiError> {
+) -> Result<(), String> {
     // Construct Apple's App Attest verification URL
     let verify_url = "https://api.devicecheck.apple.com/v1/attestation";
 
@@ -146,43 +143,38 @@ async fn verify_with_apple(
     let payload = serde_json::json!({
         "attestation_object": attestation.attestation_object,
         "challenge": attestation.challenge,
-        "key_id": attestation.key_id
+        "key_id": attestation.key_id,
     });
 
-    // Create request to Apple's service
+    // Prepare the request
+    #[allow(unused_mut)]
+    let mut h = worker::Headers::new();
+    h.set("Content-Type", "application/json")
+        .map_err(|e| format!("Header creation failed: {:?}", e))?;
+    h.set("Authorization", &format!("Bearer {}", jwt_token))
+        .map_err(|e| format!("Header creation failed: {:?}", e))?;
+
     let mut init = RequestInit::new();
-    init.method = Method::Post;
-
-    let headers = {
-        let h = worker::Headers::new();
-        h.set("Content-Type", "application/json")
-            .map_err(|e| ApiError::ValidationError(format!("Header creation failed: {:?}", e)))?;
-        h.set("Authorization", &format!("Bearer {}", jwt_token))
-            .map_err(|e| ApiError::ValidationError(format!("Header creation failed: {:?}", e)))?;
-        h
-    };
-    init.headers = headers;
-
-    init.body = Some(payload.to_string().into());
+    init.with_method(Method::Post);
+    init.with_body(Some(serde_json::to_string(&payload).unwrap().into()));
+    init.with_headers(h);
 
     let request = Request::new_with_init(verify_url, &init)
-        .map_err(|e| ApiError::ValidationError(format!("Request creation failed: {:?}", e)))?;
+        .map_err(|e| format!("Request creation failed: {:?}", e))?;
 
-    // Make the request
     let mut response = Fetch::Request(request).send().await.map_err(|e| {
         console_log!("App Attestation: Request failed: {:?}", e);
-        ApiError::ValidationError(format!("Apple verification request failed: {:?}", e))
+        format!("Apple verification request failed: {:?}", e)
     })?;
 
     let status = response.status_code();
 
     if status == 200 {
-        // Parse successful response
+        // Success
         let _ = response
             .text()
             .await
-            .map_err(|e| ApiError::ValidationError(format!("Failed to read response: {:?}", e)))?;
-
+            .map_err(|e| format!("Failed to read response: {:?}", e))?;
         Ok(())
     } else {
         // Parse error response
@@ -193,9 +185,9 @@ async fn verify_with_apple(
 
         console_log!("App Attestation: Apple verification failed: {}", error_text);
 
-        Err(ApiError::ValidationError(format!(
+        Err(format!(
             "Apple attestation verification failed ({}): {}",
             status, error_text
-        )))
+        ))
     }
 }

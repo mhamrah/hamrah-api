@@ -1,4 +1,4 @@
-name = "hamrah-api"
+name = "hamrah-api-preview"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-08-22"
 compatibility_flags = ["nodejs_compat"]
@@ -8,13 +8,26 @@ command = "worker-build --release"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "prod-hamrah-app-auth"
+database_name = "prod-hamrah-app-auth"  # Use prod database for previews (safe for preview deployments)
 database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
+
+[ai]
+binding = "AI"
+
+[[r2_buckets]]
+binding = "ARCHIVES"
+bucket_name = "hamrah-archives"
+
+
+
+[[services]]
+binding = "PIPELINE_SERVICE"
+service = "hamrah-link-pipeline-preview"
 
 [vars]
 APPLE_TEAM_ID = "UR6RM9YCF7"
 APPLE_BUNDLE_ID = "app.hamrah.ios"
-ENVIRONMENT = "production"
+ENVIRONMENT = "preview"
 APPLE_KEY_ID = "PGW4JA9UQF"
 
 [[rules]]

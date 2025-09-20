@@ -1,6 +1,6 @@
-use super::{ApiError, ApiResult};
 use crate::auth::{app_attestation, session, tokens};
 use crate::db::{schema::User, Database};
+use crate::error::{AppError, AppResult};
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
@@ -56,7 +56,7 @@ pub struct UserResponse {
 
 /// Middleware to validate internal service calls via service bindings
 /// Service bindings provide automatic authentication - we just log the call
-pub async fn validate_internal_service(_headers: &HeaderMap, _env: &Env) -> Result<(), ApiError> {
+pub async fn validate_internal_service(_headers: &HeaderMap, _env: &Env) -> AppResult<()> {
     // Log the service binding call for debugging and tracing
 
     // Service bindings automatically authenticate - no manual validation needed
@@ -70,7 +70,7 @@ pub async fn validate_client_platform(
     user_agent: Option<&str>,
     client_attestation: Option<&str>,
     env: &Env,
-) -> Result<(), ApiError> {
+) -> Result<(), String> {
     match platform {
         "web" => {
             // Web platform is validated by the internal service call itself
@@ -80,7 +80,7 @@ pub async fn validate_client_platform(
             // Validate iOS user agent
             let ua = user_agent.unwrap_or("");
             if !ua.contains("CFNetwork") && !ua.contains("hamrahIOS") {
-                return Err(ApiError::ValidationError("Invalid iOS client".to_string()));
+                return Err("Invalid iOS client".to_string().into());
             }
 
             // Check if request is from iOS Simulator
@@ -89,18 +89,17 @@ pub async fn validate_client_platform(
             }
 
             // For real devices, require App Attestation
-            let attestation_token = client_attestation.ok_or_else(|| {
-                ApiError::ValidationError("iOS App Attestation required".to_string())
-            })?;
+            let attestation_token =
+                client_attestation.ok_or_else(|| "iOS App Attestation required".to_string())?;
 
             // Validate the attestation token
-            app_attestation::validate_app_attestation(attestation_token, env).await?;
+            app_attestation::validate_app_attestation(attestation_token, env)
+                .await
+                .map_err(|e| e.to_string())?;
 
             Ok(())
         }
-        _ => Err(ApiError::ValidationError(
-            "Unsupported platform".to_string(),
-        )),
+        _ => Err("Unsupported platform".to_string()),
     }
 }
 
@@ -110,7 +109,7 @@ pub async fn create_user_internal(
     State(env): State<Env>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<CreateUserRequest>,
-) -> ApiResult<Json<InternalAuthResponse>> {
+) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
     validate_internal_service(&headers, &env).await?;
 
@@ -124,7 +123,7 @@ pub async fn create_user_internal(
             // Validate iOS user agent
             let ua = request.user_agent.as_deref().unwrap_or("");
             if !ua.contains("CFNetwork") && !ua.contains("hamrahIOS") {
-                return Err(ApiError::ValidationError("Invalid iOS client".to_string()));
+                return Err("Invalid iOS client".to_string().into());
             }
 
             // Check if request is from iOS Simulator
@@ -133,18 +132,16 @@ pub async fn create_user_internal(
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let _attestation_token =
-                    request.client_attestation.as_deref().ok_or_else(|| {
-                        ApiError::ValidationError("iOS App Attestation required".to_string())
-                    })?;
+                let _attestation_token = request
+                    .client_attestation
+                    .as_deref()
+                    .ok_or_else(|| "iOS App Attestation required".to_string())?;
 
                 // Validate the attestation token
             }
         }
         _ => {
-            return Err(ApiError::ValidationError(
-                "Unsupported platform".to_string(),
-            ))
+            return Err(AppError::bad_request("Unsupported platform"));
         }
     }
 
@@ -156,8 +153,8 @@ pub async fn create_user_internal(
             "create_user_internal: Email is empty for provider={}",
             request.provider
         );
-        return Err(ApiError::ValidationError(
-            "Email is required for authentication".to_string(),
+        return Err(AppError::bad_request(
+            "Email is required for authentication",
         ));
     }
 
@@ -168,7 +165,7 @@ pub async fn create_user_internal(
         .bind(&request.email)
         .fetch_optional(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let user_id = if let Some(existing_user) = user {
         // User exists - update their auth info and login time
@@ -197,36 +194,33 @@ pub async fn create_user_internal(
         .bind(&existing_user.id)
         .execute(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
         existing_user.id
     } else {
-        // Create new user
         let new_user_id = Uuid::new_v4().to_string();
         query(
             r#"
             INSERT INTO users (
-                id, email, name, picture, email_verified, auth_method,
-                provider, provider_id, last_login_platform, last_login_at,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, email, name, picture, auth_method, provider, provider_id,
+                last_login_platform, last_login_at, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&new_user_id)
         .bind(&request.email)
         .bind(&request.name)
         .bind(&request.picture)
-        .bind(datetime_to_timestamp(now)) // email_verified
         .bind(&request.auth_method)
         .bind(&request.provider)
         .bind(&request.provider_id)
         .bind(&request.platform)
-        .bind(datetime_to_timestamp(now)) // last_login_at
-        .bind(datetime_to_timestamp(now)) // created_at
-        .bind(datetime_to_timestamp(now)) // updated_at
+        .bind(datetime_to_timestamp(now))
+        .bind(datetime_to_timestamp(now))
+        .bind(datetime_to_timestamp(now))
         .execute(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
         new_user_id
     };
@@ -236,7 +230,7 @@ pub async fn create_user_internal(
         .bind(&user_id)
         .fetch_one(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let user_response = UserResponse {
         id: final_user.id,
@@ -263,7 +257,7 @@ pub async fn create_session_internal(
     State(env): State<Env>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<SessionRequest>,
-) -> ApiResult<Json<InternalAuthResponse>> {
+) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
     validate_internal_service(&headers, &env).await?;
 
@@ -271,14 +265,14 @@ pub async fn create_session_internal(
     let token = session::generate_session_token();
     let session = session::create_session(&mut db, &token, &request.user_id)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     // Get user details
     let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
         .bind(&request.user_id)
         .fetch_optional(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     if let Some(user) = user {
         let user_response = UserResponse {
@@ -301,7 +295,7 @@ pub async fn create_session_internal(
             error: None,
         }))
     } else {
-        Err(ApiError::NotFound)
+        Err("NotFound".to_string().into())
     }
 }
 
@@ -311,7 +305,7 @@ pub async fn create_tokens_internal(
     State(env): State<Env>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<CreateUserRequest>,
-) -> ApiResult<Json<InternalAuthResponse>> {
+) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
     validate_internal_service(&headers, &env).await?;
 
@@ -319,28 +313,30 @@ pub async fn create_tokens_internal(
     match request.platform.as_str() {
         "web" => {
             // Web platform is validated by the internal service call itself
+            // Nothing additional needed
         }
         "ios" => {
             // Validate iOS user agent
             let ua = request.user_agent.as_deref().unwrap_or("");
             if !ua.contains("CFNetwork") && !ua.contains("hamrahIOS") {
-                return Err(ApiError::ValidationError("Invalid iOS client".to_string()));
+                return Err("Invalid iOS client".to_string().into());
             }
 
             // Check if request is from iOS Simulator
             if app_attestation::is_ios_simulator(request.user_agent.as_deref()) {
+                // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let _attestation_token =
-                    request.client_attestation.as_deref().ok_or_else(|| {
-                        ApiError::ValidationError("iOS App Attestation required".to_string())
-                    })?;
+                let _attestation_token = request
+                    .client_attestation
+                    .as_deref()
+                    .ok_or_else(|| "iOS App Attestation required".to_string())?;
+
+                // Validate the attestation token
             }
         }
         _ => {
-            return Err(ApiError::ValidationError(
-                "Unsupported platform".to_string(),
-            ))
+            return Err(AppError::bad_request("Unsupported platform"));
         }
     }
 
@@ -349,23 +345,25 @@ pub async fn create_tokens_internal(
     // Validate email is present and not empty
     if request.email.trim().is_empty() {
         console_log!(
-            "create_tokens_internal: Email is empty for provider={}",
+            "create_user_internal: Email is empty for provider={}",
             request.provider
         );
-        return Err(ApiError::ValidationError(
-            "Email is required for authentication".to_string(),
+        return Err(AppError::bad_request(
+            "Email is required for authentication",
         ));
     }
 
-    // Find or create user first
+    let _now = Utc::now();
+
+    // Find or create user by email
     let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
         .bind(&request.email)
         .fetch_optional(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
-    let user_id = if let Some(user) = user {
-        user.id
+    let user_id = if let Some(existing_user) = user {
+        existing_user.id
     } else {
         // Create new user
         let new_user_id = Uuid::new_v4().to_string();
@@ -394,7 +392,7 @@ pub async fn create_tokens_internal(
         .bind(datetime_to_timestamp(now))
         .execute(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
         new_user_id
     };
@@ -408,22 +406,22 @@ pub async fn create_tokens_internal(
         None, // IP address handled by web layer
     )
     .await
-    .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+    .map_err(|e| e.to_string())?;
 
     // Get updated user
-    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
+    let final_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
         .bind(&user_id)
         .fetch_one(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let user_response = UserResponse {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        picture: user.picture,
-        auth_method: user.auth_method,
-        created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
+        id: final_user.id,
+        email: final_user.email,
+        name: final_user.name,
+        picture: final_user.picture,
+        auth_method: final_user.auth_method,
+        created_at: timestamp_to_datetime(final_user.created_at).to_rfc3339(),
     };
 
     let expires_in =
@@ -445,13 +443,13 @@ pub async fn validate_session_internal(
     State(env): State<Env>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<SessionValidationRequest>,
-) -> ApiResult<Json<InternalAuthResponse>> {
+) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
     validate_internal_service(&headers, &env).await?;
 
     if let Some((_session, user)) = session::validate_session_token(&mut db, &request.session_token)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?
+        .map_err(|e| e.to_string())?
     {
         let user_response = UserResponse {
             id: user.id,
@@ -461,7 +459,6 @@ pub async fn validate_session_internal(
             auth_method: user.auth_method,
             created_at: timestamp_to_datetime(user.created_at).to_rfc3339(),
         };
-
         Ok(Json(InternalAuthResponse {
             success: true,
             user: Some(user_response),
@@ -471,7 +468,7 @@ pub async fn validate_session_internal(
             error: None,
         }))
     } else {
-        Err(ApiError::Unauthorized)
+        Err(AppError::unauthorized("Unauthorized"))
     }
 }
 
@@ -481,32 +478,22 @@ pub async fn check_user_by_email_internal(
     State(env): State<Env>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<serde_json::Value>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     // Validate internal service call
     validate_internal_service(&headers, &env).await?;
 
     let email = request
         .get("email")
         .and_then(|e| e.as_str())
-        .ok_or_else(|| ApiError::ValidationError("Email is required".to_string()))?;
+        .ok_or_else(|| "Email is required".to_string())?;
 
-    // Check if user exists
     let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
         .bind(email)
         .fetch_optional(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "user_exists": user.is_some(),
-        "user": user.map(|u| UserResponse {
-            id: u.id,
-            email: u.email,
-            name: u.name,
-            picture: u.picture,
-            auth_method: u.auth_method,
-            created_at: timestamp_to_datetime(u.created_at).to_rfc3339(),
-        })
-    })))
+    let exists = user.is_some();
+
+    Ok(Json(serde_json::json!({ "exists": exists })))
 }

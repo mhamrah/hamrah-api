@@ -1,6 +1,6 @@
-use super::{ApiError, ApiResult};
 use crate::auth::{session, tokens};
 use crate::db::{schema::User, Database};
+use crate::error::{AppError, AppResult};
 use crate::handlers::auth::UserResponse;
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
 use axum::{
@@ -39,7 +39,7 @@ pub struct UserTokenInfo {
 pub async fn get_current_user_from_request(
     db: &mut Database,
     headers: &HeaderMap,
-) -> ApiResult<User> {
+) -> AppResult<User> {
     worker::console_log!("🔐 AUTH: Starting authentication check");
 
     // Log all headers for debugging
@@ -88,7 +88,7 @@ pub async fn get_current_user_from_request(
             }
             Err(e) => {
                 worker::console_log!("🔐 AUTH: ❌ Session validation error: {}", e.to_string());
-                return Err(ApiError::DatabaseError(e.to_string()));
+                return Err(e.to_string().into());
             }
         }
     } else {
@@ -133,7 +133,7 @@ pub async fn get_current_user_from_request(
                                     "🔐 AUTH: ❌ Failed to fetch user for token: {}",
                                     e.to_string()
                                 );
-                                return Err(ApiError::DatabaseError(e.to_string()));
+                                return Err(AppError::from(e));
                             }
                         }
                     }
@@ -147,7 +147,7 @@ pub async fn get_current_user_from_request(
                             "🔐 AUTH: ❌ Bearer token validation error: {}",
                             e.to_string()
                         );
-                        return Err(ApiError::DatabaseError(e.to_string()));
+                        return Err(AppError::from(e));
                     }
                 }
             } else {
@@ -161,13 +161,13 @@ pub async fn get_current_user_from_request(
     }
 
     worker::console_log!("🔐 AUTH: ❌ No valid authentication found - returning Unauthorized");
-    Err(ApiError::Unauthorized)
+    Err(AppError::unauthorized("Unauthorized"))
 }
 
 pub async fn get_current_user(
     State(mut db): State<Database>,
     headers: HeaderMap,
-) -> ApiResult<Json<UserResponse>> {
+) -> AppResult<Json<UserResponse>> {
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     let user_response = UserResponse {
@@ -188,12 +188,12 @@ pub async fn get_user_by_id(
     State(mut db): State<Database>,
     headers: HeaderMap,
     Path(user_id): Path<String>,
-) -> ApiResult<Json<UserResponse>> {
+) -> AppResult<Json<UserResponse>> {
     // Verify the requesting user has permission (for now, users can only get their own info)
     let current_user = get_current_user_from_request(&mut db, &headers).await?;
 
     if current_user.id != user_id {
-        return Err(ApiError::Forbidden);
+        return Err(AppError::forbidden("Forbidden"));
     }
 
     let user_response = UserResponse {
@@ -214,12 +214,11 @@ pub async fn update_current_user(
     State(mut db): State<Database>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<UpdateUserRequest>,
-) -> ApiResult<Json<UserResponse>> {
+) -> AppResult<Json<UserResponse>> {
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     let now = datetime_to_timestamp(Utc::now());
 
-    // Update user fields
     sqlx_d1::query(
         r#"
         UPDATE users
@@ -227,23 +226,23 @@ pub async fn update_current_user(
             picture = CASE WHEN ? IS NOT NULL THEN ? ELSE picture END,
             updated_at = ?
         WHERE id = ?
-    "#,
+        "#,
     )
-    .bind(&request.name)
-    .bind(&request.name)
-    .bind(&request.picture)
-    .bind(&request.picture)
+    .bind(request.name.as_ref())
+    .bind(request.name.as_ref())
+    .bind(request.picture.as_ref())
+    .bind(request.picture.as_ref())
     .bind(now)
     .bind(&user.id)
     .execute(&mut db.conn)
-    .await?;
+    .await
+    .map_err(AppError::from)?;
 
-    // Fetch updated user
     let updated_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
         .bind(&user.id)
         .fetch_one(&mut db.conn)
         .await
-        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+        .map_err(AppError::from)?;
 
     let user_response = UserResponse {
         id: updated_user.id,
@@ -262,7 +261,7 @@ pub async fn update_current_user(
 pub async fn get_user_tokens(
     State(mut db): State<Database>,
     headers: HeaderMap,
-) -> ApiResult<Json<UserTokensResponse>> {
+) -> AppResult<Json<UserTokensResponse>> {
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     let now = datetime_to_timestamp(Utc::now());
@@ -278,7 +277,7 @@ pub async fn get_user_tokens(
     .bind(now)
     .fetch_all(&mut db.conn)
     .await
-    .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+    .map_err(AppError::from)?;
 
     Ok(Json(UserTokensResponse {
         success: true,
@@ -289,14 +288,15 @@ pub async fn get_user_tokens(
 pub async fn delete_user_account(
     State(mut db): State<Database>,
     headers: HeaderMap,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> AppResult<Json<serde_json::Value>> {
     let user = get_current_user_from_request(&mut db, &headers).await?;
 
     // Delete user (cascading deletes will handle sessions, tokens, etc.)
     sqlx_d1::query("DELETE FROM users WHERE id = ?")
         .bind(&user.id)
         .execute(&mut db.conn)
-        .await?;
+        .await
+        .map_err(AppError::from)?;
 
     Ok(Json(serde_json::json!({
         "success": true,

@@ -1,0 +1,28 @@
+{
+  "name": "hamrah-link-pipeline",
+  "version": "1.0.0",
+  "description": "Cloudflare Workflows-based link processing pipeline",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --env preview",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --coverage"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.94.0",
+    "vitest": "^1.6.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "vitest-environment-miniflare": "^2.14.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
