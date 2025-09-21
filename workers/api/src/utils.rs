@@ -158,63 +158,6 @@ pub fn url_canonicalize(original: &str) -> Option<(String, String)> {
         url.set_query(Some(&query));
     }
 
-    #[test]
-    fn test_url_canonicalize_basic() {
-        let (canon, host) =
-            url_canonicalize("https://EXAMPLE.com:443/foo/bar/?utm_source=abc&ref=xyz#frag")
-                .unwrap();
-        assert_eq!(host, "example.com");
-        assert!(canon.starts_with("https://example.com/foo/bar"));
-        assert!(!canon.contains("utm_"));
-        assert!(!canon.contains("ref="));
-        assert!(!canon.contains("#frag"));
-    }
-
-    #[test]
-    fn test_url_canonicalize_trailing_slash() {
-        let (canon, _) = url_canonicalize("https://example.com/foo/bar/").unwrap();
-        assert!(!canon.ends_with("//"));
-        assert!(!canon.ends_with("/foo/bar/"));
-        assert!(canon.ends_with("/foo/bar"));
-    }
-
-    #[test]
-    fn test_url_canonicalize_collapse_slashes() {
-        let (canon, _) = url_canonicalize("https://example.com//foo///bar/").unwrap();
-        assert!(canon.contains("/foo/bar"));
-        assert!(!canon.contains("//foo"));
-    }
-
-    #[test]
-    fn test_url_canonicalize_strip_session_params() {
-        let (canon, _) =
-            url_canonicalize("https://example.com/page?sid=123&session=abc&PHPSESSID=xyz&ok=1")
-                .unwrap();
-        assert!(!canon.contains("sid="));
-        assert!(!canon.contains("session="));
-        assert!(!canon.contains("PHPSESSID"));
-        assert!(canon.contains("ok=1"));
-    }
-
-    #[test]
-    fn test_url_canonicalize_non_http() {
-        assert!(url_canonicalize("ftp://example.com/abc").is_none());
-        assert!(url_canonicalize("mailto:foo@bar.com").is_none());
-    }
-
-    #[test]
-    fn test_url_is_valid_public_http() {
-        assert!(url_is_valid_public_http("https://example.com"));
-        assert!(url_is_valid_public_http("http://foo.org/path"));
-        assert!(!url_is_valid_public_http("ftp://example.com"));
-        assert!(!url_is_valid_public_http("http://localhost"));
-        assert!(!url_is_valid_public_http("http://127.0.0.1"));
-        assert!(!url_is_valid_public_http("http://10.0.0.1"));
-        assert!(!url_is_valid_public_http("http://192.168.1.1"));
-        assert!(!url_is_valid_public_http("http://[::1]"));
-        assert!(!url_is_valid_public_http("http://mybox.local"));
-    }
-
     // Collapse multiple slashes, trim trailing slash (except root)
     let mut path = url.path().replace("//", "/");
     if path.ends_with('/') && path != "/" {
@@ -320,5 +263,62 @@ mod tests {
         assert_ne!(id1, id2);
         assert!(is_valid_uuid(&id1));
         assert!(is_valid_uuid(&id2));
+    }
+
+    #[test]
+    fn test_url_canonicalize_basic() {
+        let (canon, host) =
+            url_canonicalize("https://EXAMPLE.com:443/foo/bar/?utm_source=abc&ref=xyz#frag")
+                .unwrap();
+        assert_eq!(host, "example.com");
+        assert!(canon.starts_with("https://example.com/foo/bar"));
+        assert!(!canon.contains("utm_"));
+        assert!(!canon.contains("ref="));
+        assert!(!canon.contains("#frag"));
+    }
+
+    #[test]
+    fn test_url_canonicalize_trailing_slash() {
+        let (canon, _) = url_canonicalize("https://example.com/foo/bar/").unwrap();
+        assert!(!canon.ends_with("//"));
+        assert!(!canon.ends_with("/foo/bar/"));
+        assert!(canon.ends_with("/foo/bar"));
+    }
+
+    #[test]
+    fn test_url_canonicalize_collapse_slashes() {
+        let (canon, _) = url_canonicalize("https://example.com//foo///bar/").unwrap();
+        assert!(canon.contains("/foo/bar"));
+        assert!(!canon.contains("//foo"));
+    }
+
+    #[test]
+    fn test_url_canonicalize_strip_session_params() {
+        let (canon, _) =
+            url_canonicalize("https://example.com/page?sid=123&session=abc&PHPSESSID=xyz&ok=1")
+                .unwrap();
+        assert!(!canon.contains("sid="));
+        assert!(!canon.contains("session="));
+        assert!(!canon.contains("PHPSESSID"));
+        assert!(canon.contains("ok=1"));
+    }
+
+    #[test]
+    fn test_url_canonicalize_non_http() {
+        assert!(url_canonicalize("ftp://example.com/abc").is_none());
+        assert!(url_canonicalize("mailto:foo@bar.com").is_none());
+    }
+
+    #[test]
+    fn test_url_is_valid_public_http() {
+        assert!(url_is_valid_public_http("https://example.com"));
+        assert!(url_is_valid_public_http("http://foo.org/path"));
+        assert!(!url_is_valid_public_http("ftp://example.com"));
+        assert!(!url_is_valid_public_http("http://localhost"));
+        assert!(!url_is_valid_public_http("http://127.0.0.1"));
+        assert!(!url_is_valid_public_http("http://10.0.0.1"));
+        assert!(!url_is_valid_public_http("http://192.168.1.1"));
+        assert!(!url_is_valid_public_http("http://[::1]"));
+        assert!(!url_is_valid_public_http("http://mybox.local"));
     }
 }
