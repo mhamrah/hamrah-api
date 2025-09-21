@@ -55,4 +55,5 @@ serde_urlencoded = "0.7.1"
 # WebAuthn-rs removed - WebAuthn protocol handled in web layer only
 
 [dev-dependencies]
+tokio = { version = "1.0", default-features = false, features = ["macros", "rt"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "derive", "macros"] }
