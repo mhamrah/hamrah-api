@@ -80,7 +80,7 @@ pub async fn validate_client_platform(
             // Validate iOS user agent
             let ua = user_agent.unwrap_or("");
             if !ua.contains("CFNetwork") && !ua.contains("hamrahIOS") {
-                return Err("Invalid iOS client".to_string().into());
+                return Err("Invalid iOS client".to_string());
             }
 
             // Check if request is from iOS Simulator

@@ -288,12 +288,7 @@ pub async fn get_links(
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(100);
-    if limit < 1 {
-        limit = 1;
-    }
-    if limit > 500 {
-        limit = 500;
-    }
+    limit = limit.clamp(1, 500);
     let include_deleted = params
         .get("includeDeleted")
         .map(|v| v == "true" || v == "1")
@@ -421,12 +416,7 @@ pub async fn get_links_compact(
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(200);
-    if limit < 1 {
-        limit = 1;
-    }
-    if limit > 1000 {
-        limit = 1000;
-    }
+    limit = limit.clamp(1, 1000);
     let include_deleted = params
         .get("includeDeleted")
         .map(|v| v == "true" || v == "1")
