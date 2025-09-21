@@ -1,6 +1,4 @@
-/// <reference path="./ambient.d.ts" />
 import { WorkflowEntrypoint, WorkflowEvent, WorkflowStep, WorkerEntrypoint } from "cloudflare:workers";
-import type { D1Database, R2Bucket, Ai, Workflow } from "cloudflare:workers";
 
 interface Env {
   DB: D1Database;
@@ -499,7 +497,7 @@ async function aiSummarize(
   const system = `You are a summarization assistant. Produce ${opts.style} summaries of the provided content.`;
   const user = `Summarize the following content in ${opts.style} form.\n\nContent:\n${text}`;
 
-  const result: any = await ai.run(model, {
+  const result: any = await ai.run(model as any, {
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -523,7 +521,7 @@ async function aiTag(ai: Ai, model: string, text: string): Promise<string[]> {
     "You are an assistant that extracts 3-7 concise topical tags from content. Output a JSON array of lowercase tags (strings).";
   const user = `Extract tags for this content:\n${text}`;
 
-  const res: any = await ai.run(model, {
+  const res: any = await ai.run(model as any, {
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
