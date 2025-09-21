@@ -7,7 +7,7 @@ use worker::{console_log, Env, Headers, Method, RequestInit};
 /// Wrangler config requirements (already set up in this repository's wrangler files):
 /// - A service binding named `PIPELINE_SERVICE` that points to the pipeline worker
 /// - The pipeline worker must expose a POST /processLink endpoint that accepts:
-///     { "linkId": "<link-id>", "userId": "<user-id>" }
+///   { "linkId": "<link-id>", "userId": "<user-id>" }
 ///
 /// Usage:
 ///   if let Err(e) = trigger_pipeline_for_link(&env, &link_id, &user_id).await {

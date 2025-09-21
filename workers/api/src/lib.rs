@@ -233,9 +233,6 @@ pub fn app_router(state: AppState) -> Router<AppState> {
         .with_state(state)
 }
 
-fn create_router(state: AppState) -> axum::Router<AppState> {
-    app_router(state)
-}
 
 #[event(fetch)]
 async fn fetch(

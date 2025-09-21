@@ -9,7 +9,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 /// Convenient result alias for handlers.
-pub type AppResult<T> = Result<T, AppError>;
+pub type AppResult<T> = Result<T, Box<AppError>>;
 
 /// Canonical error codes for API responses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -212,6 +212,12 @@ impl IntoResponse for AppError {
     }
 }
 
+impl IntoResponse for Box<AppError> {
+    fn into_response(self) -> Response {
+        (*self).into_response()
+    }
+}
+
 // --- Conversions from common error types to AppError ---
 
 impl From<String> for AppError {
@@ -263,6 +269,45 @@ impl From<uuid::Error> for AppError {
     }
 }
 
+// --- Conversions to Box<AppError> for the new AppResult type ---
+
+impl From<String> for Box<AppError> {
+    fn from(value: String) -> Self {
+        Box::new(AppError::from_sentinel(&value))
+    }
+}
+
+impl From<&str> for Box<AppError> {
+    fn from(value: &str) -> Self {
+        Box::new(AppError::from_sentinel(value))
+    }
+}
+
+
+impl From<serde_json::Error> for Box<AppError> {
+    fn from(err: serde_json::Error) -> Self {
+        Box::new(AppError::from(err))
+    }
+}
+
+impl From<worker::Error> for Box<AppError> {
+    fn from(err: worker::Error) -> Self {
+        Box::new(AppError::from(err))
+    }
+}
+
+impl From<sqlx_d1::Error> for Box<AppError> {
+    fn from(err: sqlx_d1::Error) -> Self {
+        Box::new(AppError::from(err))
+    }
+}
+
+impl From<uuid::Error> for Box<AppError> {
+    fn from(err: uuid::Error) -> Self {
+        Box::new(AppError::from(err))
+    }
+}
+
 // --- Small ergonomic helpers ---
 
 /// Extension trait for Option to convert to AppError.
@@ -273,10 +318,10 @@ pub trait OptionExt<T> {
 
 impl<T> OptionExt<T> for Option<T> {
     fn or_not_found(self, what: &'static str) -> AppResult<T> {
-        self.ok_or_else(|| AppError::not_found(what))
+        self.ok_or_else(|| Box::new(AppError::not_found(what)))
     }
     fn or_bad_request(self, msg: &'static str) -> AppResult<T> {
-        self.ok_or_else(|| AppError::bad_request(msg))
+        self.ok_or_else(|| Box::new(AppError::bad_request(msg)))
     }
 }
 
@@ -292,14 +337,14 @@ impl<T, E> ResultAnyhowExt<T, E> for Result<T, E> {
     where
         E: Display,
     {
-        self.map_err(|e| AppError::anyhow(format!("{context}: {e}")))
+        self.map_err(|e| Box::new(AppError::anyhow(format!("{context}: {e}"))))
     }
 }
 
 /// Build a standardized 500 from any error, capturing its Display string in details.
 /// Useful with `map_err(AppError::from_anyhow)` style.
-pub fn from_anyhow<E: Display>(err: E) -> AppError {
-    AppError::anyhow(err)
+pub fn from_anyhow<E: Display>(err: E) -> Box<AppError> {
+    Box::new(AppError::anyhow(err))
 }
 
 #[cfg(test)]

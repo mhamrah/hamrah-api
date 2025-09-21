@@ -162,7 +162,7 @@ pub async fn store_webauthn_credential(
                 payload.id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 
@@ -264,7 +264,7 @@ pub async fn get_webauthn_credential(
                 "🛠️ WEBAUTHN/API get_webauthn_credential: NOT_FOUND id={}",
                 credential_id
             );
-            Err(AppError::not_found("Credential not found"))
+            Err(Box::new(AppError::not_found("Credential not found")))
         }
     }
 }
@@ -314,9 +314,9 @@ pub async fn get_user_webauthn_credentials(
             current_user.id,
             user_id
         );
-        return Err(AppError::forbidden(
+        return Err(Box::new(AppError::forbidden(
             "Unauthorized: cannot access other user's credentials",
-        ));
+        )));
     }
 
     worker::console_log!(
@@ -347,7 +347,7 @@ pub async fn get_user_webauthn_credentials(
         }
         Err(e) => {
             worker::console_log!("🔑 WEBAUTHN: ❌ Database query failed: {:?}", e);
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     };
 
@@ -480,7 +480,7 @@ pub async fn update_webauthn_credential_counter(
                 credential_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 
@@ -556,7 +556,7 @@ pub async fn delete_webauthn_credential(
                 credential_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     };
 
@@ -575,9 +575,9 @@ pub async fn delete_webauthn_credential(
                     current_user.id,
                     cred.user_id
                 );
-                return Err(AppError::forbidden(
+                return Err(Box::new(AppError::forbidden(
                     "Unauthorized: cannot delete other user's credential",
-                ));
+                )));
             }
         }
         None => {
@@ -585,7 +585,7 @@ pub async fn delete_webauthn_credential(
                 "🛠️ WEBAUTHN/API delete_webauthn_credential: NOT_FOUND id={}",
                 credential_id
             );
-            return Err(AppError::not_found("Credential not found"));
+            return Err(Box::new(AppError::not_found("Credential not found")));
         }
     }
 
@@ -614,7 +614,7 @@ pub async fn delete_webauthn_credential(
                 credential_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 
@@ -706,7 +706,7 @@ pub async fn update_webauthn_credential_name(
                 credential_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     };
 
@@ -726,9 +726,9 @@ pub async fn update_webauthn_credential_name(
                     current_user.id,
                     cred.user_id
                 );
-                return Err(AppError::forbidden(
+                return Err(Box::new(AppError::forbidden(
                     "Unauthorized: cannot update other user's credential",
-                ));
+                )));
             }
         }
         None => {
@@ -736,7 +736,7 @@ pub async fn update_webauthn_credential_name(
                 "🛠️ WEBAUTHN/API update_webauthn_credential_name: NOT_FOUND id={}",
                 credential_id
             );
-            return Err(AppError::not_found("Credential not found"));
+            return Err(Box::new(AppError::not_found("Credential not found")));
         }
     }
 
@@ -767,7 +767,7 @@ pub async fn update_webauthn_credential_name(
                 credential_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 
@@ -827,7 +827,7 @@ pub async fn store_webauthn_challenge(
                 payload.id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 
@@ -877,7 +877,7 @@ pub async fn get_webauthn_challenge(
                 challenge_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     };
 
@@ -915,7 +915,7 @@ pub async fn get_webauthn_challenge(
                 "🛠️ WEBAUTHN/API get_webauthn_challenge: NOT_FOUND id={}",
                 challenge_id
             );
-            Err(AppError::not_found("Challenge not found"))
+            Err(Box::new(AppError::not_found("Challenge not found")))
         }
     }
 }
@@ -951,7 +951,7 @@ pub async fn delete_webauthn_challenge(
                 challenge_id,
                 e
             );
-            return Err(AppError::from(e));
+            return Err(Box::new(AppError::from(e)));
         }
     }
 

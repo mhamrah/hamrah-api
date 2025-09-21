@@ -133,7 +133,7 @@ pub async fn get_current_user_from_request(
                                     "🔐 AUTH: ❌ Failed to fetch user for token: {}",
                                     e.to_string()
                                 );
-                                return Err(AppError::from(e));
+                                return Err(Box::new(AppError::from(e)));
                             }
                         }
                     }
@@ -147,7 +147,7 @@ pub async fn get_current_user_from_request(
                             "🔐 AUTH: ❌ Bearer token validation error: {}",
                             e.to_string()
                         );
-                        return Err(AppError::from(e));
+                        return Err(Box::new(AppError::from(e)));
                     }
                 }
             } else {
@@ -161,7 +161,7 @@ pub async fn get_current_user_from_request(
     }
 
     worker::console_log!("🔐 AUTH: ❌ No valid authentication found - returning Unauthorized");
-    Err(AppError::unauthorized("Unauthorized"))
+    Err(Box::new(AppError::unauthorized("Unauthorized")))
 }
 
 pub async fn get_current_user(
@@ -193,7 +193,7 @@ pub async fn get_user_by_id(
     let current_user = get_current_user_from_request(&mut db, &headers).await?;
 
     if current_user.id != user_id {
-        return Err(AppError::forbidden("Forbidden"));
+        return Err(Box::new(AppError::forbidden("Forbidden")));
     }
 
     let user_response = UserResponse {

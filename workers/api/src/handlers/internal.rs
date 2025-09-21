@@ -141,7 +141,7 @@ pub async fn create_user_internal(
             }
         }
         _ => {
-            return Err(AppError::bad_request("Unsupported platform"));
+            return Err(Box::new(AppError::bad_request("Unsupported platform")));
         }
     }
 
@@ -153,9 +153,9 @@ pub async fn create_user_internal(
             "create_user_internal: Email is empty for provider={}",
             request.provider
         );
-        return Err(AppError::bad_request(
+        return Err(Box::new(AppError::bad_request(
             "Email is required for authentication",
-        ));
+        )));
     }
 
     let now = Utc::now();
@@ -336,7 +336,7 @@ pub async fn create_tokens_internal(
             }
         }
         _ => {
-            return Err(AppError::bad_request("Unsupported platform"));
+            return Err(Box::new(AppError::bad_request("Unsupported platform")));
         }
     }
 
@@ -348,9 +348,9 @@ pub async fn create_tokens_internal(
             "create_user_internal: Email is empty for provider={}",
             request.provider
         );
-        return Err(AppError::bad_request(
+        return Err(Box::new(AppError::bad_request(
             "Email is required for authentication",
-        ));
+        )));
     }
 
     let _now = Utc::now();
@@ -468,7 +468,7 @@ pub async fn validate_session_internal(
             error: None,
         }))
     } else {
-        Err(AppError::unauthorized("Unauthorized"))
+        Err(Box::new(AppError::unauthorized("Unauthorized")))
     }
 }
 

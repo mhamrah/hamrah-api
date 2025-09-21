@@ -86,7 +86,7 @@ pub async fn validate_session(
         }
     }
 
-    Err(AppError::unauthorized("Unauthorized"))
+    Err(Box::new(AppError::unauthorized("Unauthorized")))
 }
 
 // Token creation is now handled via internal API only
@@ -110,7 +110,7 @@ pub async fn refresh_token_endpoint(
             expires_in: Some(expires_in),
         }))
     } else {
-        Err(AppError::unauthorized("Unauthorized"))
+        Err(Box::new(AppError::unauthorized("Unauthorized")))
     }
 }
 
