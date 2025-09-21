@@ -159,7 +159,10 @@ pub fn url_canonicalize(original: &str) -> Option<(String, String)> {
     }
 
     // Collapse multiple slashes, trim trailing slash (except root)
-    let mut path = url.path().replace("//", "/");
+    let mut path = url.path().to_string();
+    while path.contains("//") {
+        path = path.replace("//", "/");
+    }
     if path.ends_with('/') && path != "/" {
         path.pop();
         url.set_path(&path);
@@ -188,8 +191,13 @@ pub fn url_is_valid_public_http(url: &str) -> bool {
         if host_lc == "localhost" || host_lc.ends_with(".local") {
             return false;
         }
-        // Try to parse as IP
-        if let Ok(ip) = host.parse::<IpAddr>() {
+        // Try to parse as IP (strip brackets for IPv6)
+        let ip_str = if host.starts_with('[') && host.ends_with(']') {
+            &host[1..host.len()-1]
+        } else {
+            host
+        };
+        if let Ok(ip) = ip_str.parse::<IpAddr>() {
             match ip {
                 IpAddr::V4(v4) => {
                     if v4.is_loopback() || v4.is_private() || v4.is_link_local() {
@@ -318,7 +326,9 @@ mod tests {
         assert!(!url_is_valid_public_http("http://127.0.0.1"));
         assert!(!url_is_valid_public_http("http://10.0.0.1"));
         assert!(!url_is_valid_public_http("http://192.168.1.1"));
+
         assert!(!url_is_valid_public_http("http://[::1]"));
+
         assert!(!url_is_valid_public_http("http://mybox.local"));
     }
 }
