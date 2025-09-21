@@ -6,8 +6,6 @@ workers/api/build/
 node_modules/
 workers/link-pipeline/node_modules/
 workers/link-pipeline/dist/
-package-lock.json
-workers/link-pipeline/package-lock.json
 
 # Wrangler
 .wrangler/
