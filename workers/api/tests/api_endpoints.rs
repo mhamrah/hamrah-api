@@ -86,7 +86,8 @@ async fn test_api_status_endpoint() {
 
 #[tokio::test]
 async fn test_not_found_endpoint() {
-    let (status, _body) = make_request(create_test_router(), Method::GET, "/nonexistent", None).await;
+    let (status, _body) =
+        make_request(create_test_router(), Method::GET, "/nonexistent", None).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
