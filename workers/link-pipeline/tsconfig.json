@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "outDir": "./dist",
+    "rootDir": "./src",
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"],
     "allowSyntheticDefaultImports": true,
@@ -11,8 +13,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", ".wrangler"]
