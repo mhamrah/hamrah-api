@@ -193,7 +193,7 @@ pub fn url_is_valid_public_http(url: &str) -> bool {
         }
         // Try to parse as IP (strip brackets for IPv6)
         let ip_str = if host.starts_with('[') && host.ends_with(']') {
-            &host[1..host.len()-1]
+            &host[1..host.len() - 1]
         } else {
             host
         };
