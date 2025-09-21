@@ -23,6 +23,6 @@
     "vitest-environment-miniflare": "^2.14.4"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }
