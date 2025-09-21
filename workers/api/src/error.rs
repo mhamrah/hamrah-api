@@ -283,7 +283,6 @@ impl From<&str> for Box<AppError> {
     }
 }
 
-
 impl From<serde_json::Error> for Box<AppError> {
     fn from(err: serde_json::Error) -> Self {
         Box::new(AppError::from(err))

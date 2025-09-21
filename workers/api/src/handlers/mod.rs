@@ -563,7 +563,9 @@ pub async fn get_link_by_id(
     if let Some(link) = row {
         Ok(Json(json!({ "link": link })))
     } else {
-        Err(Box::new(crate::error::AppError::not_found("Archive not found")))
+        Err(Box::new(crate::error::AppError::not_found(
+            "Archive not found",
+        )))
     }
 }
 
@@ -734,7 +736,9 @@ pub async fn get_link_archive(
     if let Some(a) = row {
         Ok(Json(json!({ "archive": a })))
     } else {
-        Err(Box::new(crate::error::AppError::not_found("Link not found")))
+        Err(Box::new(crate::error::AppError::not_found(
+            "Link not found",
+        )))
     }
 }
 

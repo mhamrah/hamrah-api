@@ -233,7 +233,6 @@ pub fn app_router(state: AppState) -> Router<AppState> {
         .with_state(state)
 }
 
-
 #[event(fetch)]
 async fn fetch(
     req: HttpRequest,
