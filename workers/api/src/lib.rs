@@ -29,6 +29,7 @@
 //! - `POST /v1/push/register` - Register push token
 //! - `GET /v1/user/prefs` - Get user preferences
 //! - `PUT /v1/user/prefs` - Update user preferences
+//! - `GET /v1/models` - Get available AI models from Cloudflare AI platform
 //! - WebAuthn endpoints for passkey authentication
 //! - Auth endpoints for session and token management
 //! - User management endpoints
@@ -105,27 +106,28 @@ pub fn app_router(state: AppState) -> Router<AppState> {
             post(handlers::internal::check_user_by_email_internal),
         )
         // --- v1 Links Pipeline Endpoints ---
-        .route("/v1/links", get(handlers::get_links))
-        .route("/v1/links/compact", get(handlers::get_links_compact))
+        .route("/v1/links", get(handlers::links_list::get_links).post(handlers::links::post_links))
+        .route("/v1/links/compact", get(handlers::links_list::get_links_compact))
         .route(
             "/v1/links/:id",
-            get(handlers::get_link_by_id)
-                .patch(handlers::patch_link_by_id)
-                .delete(handlers::delete_link_by_id),
+            get(handlers::links_detail::get_link_by_id)
+                .patch(handlers::links_detail::patch_link_by_id)
+                .delete(handlers::links_detail::delete_link_by_id),
         )
         .route(
             "/v1/links/:id/archive",
-            get(handlers::get_link_archive).head(handlers::head_link_archive),
+            get(handlers::links_archive::get_link_archive).head(handlers::links_archive::head_link_archive),
         )
         // .route("/v1/links/:id/refresh", post(handlers::post_link_refresh))
-        .route("/v1/push/register", post(handlers::post_push_register))
+        .route("/v1/push/register", post(handlers::push::post_push_register))
         .route(
             "/v1/user/prefs",
-            get(handlers::get_user_prefs).put(handlers::put_user_prefs),
+            get(handlers::user_prefs::get_user_prefs).put(handlers::user_prefs::put_user_prefs),
         )
-        .route("/v1/links/:id/tags", get(handlers::get_link_tags))
-        .route("/v1/users/me/tags", get(handlers::get_user_tags))
+        .route("/v1/links/:id/tags", get(handlers::tags::get_link_tags))
+        .route("/v1/users/me/tags", get(handlers::tags::get_user_tags))
         .route("/v1/summary/config", get(handlers::get_summary_config))
+        .route("/v1/models", get(handlers::models::get_models))
         .route(
             "/api/internal/tokens",
             post(handlers::internal::create_tokens_internal),

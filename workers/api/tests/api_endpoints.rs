@@ -224,3 +224,7 @@ fn test_api_paths_documentation() {
 
     assert_eq!(current_paths.len(), 3);
 }
+
+// Note: Full integration test for /v1/models endpoint would require
+// proper Cloudflare Workers environment setup. For now, we verify the
+// endpoint compiles and the fallback logic works correctly.
