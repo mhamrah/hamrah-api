@@ -3,7 +3,6 @@ use axum::{
     http::{Method, Request, StatusCode},
     Router,
 };
-use hamrah_api::AppState;
 use tower::ServiceExt;
 
 // Helper function to create a test router
@@ -19,7 +18,7 @@ fn create_test_router() -> Router {
 
 // Helper function to make requests
 async fn make_request(
-    router: &mut Router,
+    router: Router,
     method: Method,
     uri: &str,
     body: Option<&str>,
@@ -47,9 +46,7 @@ async fn make_request(
 
 #[tokio::test]
 async fn test_root_endpoint() {
-    let mut router = create_test_router();
-
-    let (status, body) = make_request(&mut router, Method::GET, "/", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/", None).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, "Hamrah API v1.0");
@@ -57,9 +54,7 @@ async fn test_root_endpoint() {
 
 #[tokio::test]
 async fn test_health_check_endpoint() {
-    let mut router = create_test_router();
-
-    let (status, body) = make_request(&mut router, Method::GET, "/health", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/health", None).await;
 
     assert_eq!(status, StatusCode::OK);
     // Health endpoint returns JSON with status, timestamp, and version
@@ -70,9 +65,7 @@ async fn test_health_check_endpoint() {
 
 #[tokio::test]
 async fn test_api_test_endpoint() {
-    let mut router = create_test_router();
-
-    let (status, body) = make_request(&mut router, Method::GET, "/api/test", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/api/test", None).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, "Hamrah API v1.0");
@@ -80,9 +73,7 @@ async fn test_api_test_endpoint() {
 
 #[tokio::test]
 async fn test_api_status_endpoint() {
-    let mut router = create_test_router();
-
-    let (status, body) = make_request(&mut router, Method::GET, "/api/status", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/api/status", None).await;
 
     assert_eq!(status, StatusCode::OK);
     // Status endpoint returns JSON with operational status
@@ -95,27 +86,21 @@ async fn test_api_status_endpoint() {
 
 #[tokio::test]
 async fn test_not_found_endpoint() {
-    let mut router = create_test_router();
-
-    let (status, _body) = make_request(&mut router, Method::GET, "/nonexistent", None).await;
+    let (status, _body) = make_request(create_test_router(), Method::GET, "/nonexistent", None).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn test_method_not_allowed() {
-    let mut router = create_test_router();
-
     // Try POST on a GET-only endpoint
-    let (status, _body) = make_request(&mut router, Method::POST, "/health", None).await;
+    let (status, _body) = make_request(create_test_router(), Method::POST, "/health", None).await;
 
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
 async fn test_cors_headers() {
-    let mut router = create_test_router();
-
     let request = Request::builder()
         .method(Method::OPTIONS)
         .uri("/")
@@ -124,7 +109,7 @@ async fn test_cors_headers() {
         .body(Body::empty())
         .unwrap();
 
-    let response = router.oneshot(request).await.unwrap();
+    let response = create_test_router().oneshot(request).await.unwrap();
 
     // Should handle OPTIONS request - basic router returns 405 for unsupported methods
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
@@ -132,9 +117,7 @@ async fn test_cors_headers() {
 
 #[tokio::test]
 async fn test_json_response_format() {
-    let mut router = create_test_router();
-
-    let (status, body) = make_request(&mut router, Method::GET, "/", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/", None).await;
 
     assert_eq!(status, StatusCode::OK);
     // Root endpoint returns plain text for now
@@ -143,11 +126,9 @@ async fn test_json_response_format() {
 
 #[tokio::test]
 async fn test_multiple_requests() {
-    let mut router = create_test_router();
-
     // Test that we can make multiple requests to the same router
     for _ in 0..3 {
-        let (status, body) = make_request(&mut router, Method::GET, "/health", None).await;
+        let (status, body) = make_request(create_test_router(), Method::GET, "/health", None).await;
         assert_eq!(status, StatusCode::OK);
         assert!(body.contains("\"status\":\"healthy\""));
     }
@@ -155,27 +136,23 @@ async fn test_multiple_requests() {
 
 #[tokio::test]
 async fn test_different_endpoints() {
-    let mut router = create_test_router();
-
     // Test multiple different endpoints
     let endpoints = vec![("/", "Hamrah API v1.0"), ("/api/test", "Hamrah API v1.0")];
 
     for (path, expected_body) in endpoints {
-        let (status, body) = make_request(&mut router, Method::GET, path, None).await;
+        let (status, body) = make_request(create_test_router(), Method::GET, path, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, expected_body);
     }
 
     // Test health endpoint separately since it returns JSON
-    let (status, body) = make_request(&mut router, Method::GET, "/health", None).await;
+    let (status, body) = make_request(create_test_router(), Method::GET, "/health", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("\"status\":\"healthy\""));
 }
 
 #[tokio::test]
 async fn test_request_with_headers() {
-    let mut router = create_test_router();
-
     let request = Request::builder()
         .method(Method::GET)
         .uri("/health")
@@ -184,7 +161,7 @@ async fn test_request_with_headers() {
         .body(Body::empty())
         .unwrap();
 
-    let response = router.oneshot(request).await.unwrap();
+    let response = create_test_router().oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
 }
