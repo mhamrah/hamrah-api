@@ -17,10 +17,7 @@ binding = "DB"
 database_name = "prod-hamrah-app-auth"
 database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 
-# R2 bucket for storing archived HTML and related artifacts
-[[r2_buckets]]
-binding = "ARCHIVES"
-bucket_name = "hamrah-archives"
+
 
 # Workflow entrypoint binding
 # Other Workers can call this workflow by creating an instance via env.LINK_PIPELINE
@@ -44,9 +41,7 @@ binding = "DB"
 database_name = "prod-hamrah-app-auth"  # Use same database for preview
 database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 
-[[env.preview.r2_buckets]]
-binding = "ARCHIVES"
-bucket_name = "hamrah-archives"
+
 
 [[env.preview.workflows]]
 name = "link-pipeline-preview"

@@ -1,36 +1,62 @@
-use crate::db::Database;
 use crate::error::{AppError, AppResult};
 use crate::handlers::common::{UserPrefsRequest, UserPrefsRow};
 use crate::handlers::users::get_current_user_from_request;
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    response::Json,
-    Json as JsonExtractor,
-};
+use crate::shared_handles::SharedHandles;
+use axum::{extract::Extension, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde_json::json;
 use sqlx_d1::{query, query_as};
 
 /// GET /v1/user/prefs
 pub async fn get_user_prefs(
-    State(mut db): State<Database>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    // Build owned header pairs to pass into executor
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
 
-    let prefs = query_as::<UserPrefsRow>(
-        r#"
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await?;
+
+    // Fetch prefs
+    let user_id_q = user.id.clone();
+    let prefs = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<UserPrefsRow>(
+                r#"
         SELECT user_id, preferred_models, summary_models, summary_prompt_override,
                created_at, updated_at
         FROM user_prefs
         WHERE user_id = ?
         "#,
-    )
-    .bind(&user.id)
-    .fetch_optional(&mut db.conn)
-    .await
-    .map_err(|e| AppError::from(e))?;
+            )
+            .bind(&user_id_q)
+            .fetch_optional(&mut db.conn)
+            .await
+        })
+        .await
+        .map_err(|e| AppError::from(e))?;
 
     match prefs {
         Some(row) => Ok(Json(json!({
@@ -41,86 +67,138 @@ pub async fn get_user_prefs(
             "created_at": row.created_at,
             "updated_at": row.updated_at
         }))),
-        None => {
-            // Return default preferences
-            Ok(Json(json!({
-                "user_id": user.id,
-                "preferred_models": null,
-                "summary_models": null,
-                "summary_prompt_override": null,
-                "created_at": null,
-                "updated_at": null
-            })))
-        }
+        None => Ok(Json(json!({
+            "user_id": user.id,
+            "preferred_models": null,
+            "summary_models": null,
+            "summary_prompt_override": null,
+            "created_at": null,
+            "updated_at": null
+        }))),
     }
 }
 
 /// PUT /v1/user/prefs
 pub async fn put_user_prefs(
-    State(mut db): State<Database>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(req): JsonExtractor<UserPrefsRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    // Get current user through executor
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await?;
 
     let now = Utc::now().to_rfc3339();
 
     // Check if preferences already exist
-    let exists = query_as::<(String,)>("SELECT user_id FROM user_prefs WHERE user_id = ?")
-        .bind(&user.id)
-        .fetch_optional(&mut db.conn)
+    let user_id_q = user.id.clone();
+    let exists = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<(String,)>("SELECT user_id FROM user_prefs WHERE user_id = ?")
+                .bind(&user_id_q)
+                .fetch_optional(&mut db.conn)
+                .await
+        })
         .await
         .map_err(|e| AppError::from(e))?;
 
     if exists.is_some() {
         // Update existing preferences
-        query(
-            r#"
+        let user_id_q2 = user.id.clone();
+        let preferred_q = req.preferred_models.clone();
+        let summary_q = req.summary_models.clone();
+        let override_q = req.summary_prompt_override.clone();
+        let now_q = now.clone();
+        handles
+            .db
+            .run(move |mut db| async move {
+                query(
+                    r#"
             UPDATE user_prefs
             SET preferred_models = ?, summary_models = ?, summary_prompt_override = ?, updated_at = ?
             WHERE user_id = ?
-            "#,
-        )
-        .bind(&req.preferred_models)
-        .bind(&req.summary_models)
-        .bind(&req.summary_prompt_override)
-        .bind(&now)
-        .bind(&user.id)
-        .execute(&mut db.conn)
-        .await
-        .map_err(|e| AppError::from(e))?;
+            "#
+                )
+                .bind(&preferred_q)
+                .bind(&summary_q)
+                .bind(&override_q)
+                .bind(&now_q)
+                .bind(&user_id_q2)
+                .execute(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(|e| AppError::from(e))?;
     } else {
         // Insert new preferences
-        query(
-            r#"
+        let user_id_q3 = user.id.clone();
+        let preferred_q = req.preferred_models.clone();
+        let summary_q = req.summary_models.clone();
+        let override_q = req.summary_prompt_override.clone();
+        let now_q = now.clone();
+        handles
+            .db
+            .run(move |mut db| async move {
+                query(
+                    r#"
             INSERT INTO user_prefs (user_id, preferred_models, summary_models, summary_prompt_override, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&user.id)
-        .bind(&req.preferred_models)
-        .bind(&req.summary_models)
-        .bind(&req.summary_prompt_override)
-        .bind(&now)
-        .bind(&now)
-        .execute(&mut db.conn)
-        .await
-        .map_err(|e| AppError::from(e))?;
+            "#
+                )
+                .bind(&user_id_q3)
+                .bind(&preferred_q)
+                .bind(&summary_q)
+                .bind(&override_q)
+                .bind(&now_q)
+                .bind(&now_q)
+                .execute(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(|e| AppError::from(e))?;
     }
 
     // Return updated preferences
-    let updated_prefs = query_as::<UserPrefsRow>(
-        r#"
+    let user_id_q4 = user.id.clone();
+    let updated_prefs = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<UserPrefsRow>(
+                r#"
         SELECT user_id, preferred_models, summary_models, summary_prompt_override,
                created_at, updated_at
         FROM user_prefs
         WHERE user_id = ?
         "#,
-    )
-    .bind(&user.id)
-    .fetch_one(&mut db.conn)
-    .await
-    .map_err(|e| AppError::from(e))?;
+            )
+            .bind(&user_id_q4)
+            .fetch_one(&mut db.conn)
+            .await
+        })
+        .await
+        .map_err(|e| AppError::from(e))?;
 
     Ok(Json(json!({
         "user_id": updated_prefs.user_id,

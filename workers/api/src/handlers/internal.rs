@@ -1,8 +1,9 @@
-use crate::auth::{app_attestation, session, tokens};
-use crate::db::{schema::User, Database};
+use crate::auth::{app_attestation, session};
+use crate::db::schema::User;
 use crate::error::{AppError, AppResult};
+use crate::shared_handles::SharedHandles;
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
-use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
+use axum::{extract::Extension, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx_d1::{query, query_as};
@@ -56,7 +57,7 @@ pub struct UserResponse {
 
 /// Middleware to validate internal service calls via service bindings
 /// Service bindings provide automatic authentication - we just log the call
-pub async fn validate_internal_service(_headers: &HeaderMap, _env: &Env) -> AppResult<()> {
+pub async fn validate_internal_service(_headers: &HeaderMap) -> AppResult<()> {
     // Log the service binding call for debugging and tracing
 
     // Service bindings automatically authenticate - no manual validation needed
@@ -105,13 +106,13 @@ pub async fn validate_client_platform(
 
 /// Internal endpoint to create users (only from hamrah-app)
 pub async fn create_user_internal(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<CreateUserRequest>,
 ) -> AppResult<Json<InternalAuthResponse>> {
+    // DB is accessed via SharedHandles executor; no direct clone here
     // Validate internal service call
-    validate_internal_service(&headers, &env).await?;
+    validate_internal_service(&headers).await?;
 
     // Validate platform and attestation
     match request.platform.as_str() {
@@ -132,12 +133,22 @@ pub async fn create_user_internal(
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let _attestation_token = request
+                let attestation_token = request
                     .client_attestation
                     .as_deref()
                     .ok_or_else(|| "iOS App Attestation required".to_string())?;
 
-                // Validate the attestation token
+                // Validate the attestation token against Apple via Env handle
+                {
+                    let token_owned = attestation_token.to_string();
+                    handles
+                        .env
+                        .run(move |env| async move {
+                            app_attestation::validate_app_attestation(&token_owned, &env).await
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
             }
         }
         _ => {
@@ -161,16 +172,33 @@ pub async fn create_user_internal(
     let now = Utc::now();
 
     // Find or create user by email
-    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
-        .bind(&request.email)
-        .fetch_optional(&mut db.conn)
+    let email_q = request.email.clone();
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<User>("SELECT * FROM users WHERE email = ?")
+                .bind(&email_q)
+                .fetch_optional(&mut db.conn)
+                .await
+        })
         .await
         .map_err(AppError::from)?;
 
     let user_id = if let Some(existing_user) = user {
         // User exists - update their auth info and login time
-        query(
-            r#"
+        let name_q = request.name.clone();
+        let picture_q = request.picture.clone();
+        let auth_method_q = request.auth_method.clone();
+        let provider_q = request.provider.clone();
+        let provider_id_q = request.provider_id.clone();
+        let platform_q = request.platform.clone();
+        let existing_id_q = existing_user.id.clone();
+        let now_ts = datetime_to_timestamp(now);
+        handles
+            .db
+            .run(move |mut db| async move {
+                query(
+                    r#"
             UPDATE users SET
                 name = COALESCE(?, name),
                 picture = COALESCE(?, picture),
@@ -182,53 +210,73 @@ pub async fn create_user_internal(
                 updated_at = ?
             WHERE id = ?
             "#,
-        )
-        .bind(&request.name)
-        .bind(&request.picture)
-        .bind(&request.auth_method)
-        .bind(&request.provider)
-        .bind(&request.provider_id)
-        .bind(&request.platform)
-        .bind(datetime_to_timestamp(now))
-        .bind(datetime_to_timestamp(now))
-        .bind(&existing_user.id)
-        .execute(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
-
+                )
+                .bind(&name_q)
+                .bind(&picture_q)
+                .bind(&auth_method_q)
+                .bind(&provider_q)
+                .bind(&provider_id_q)
+                .bind(&platform_q)
+                .bind(now_ts)
+                .bind(now_ts)
+                .bind(&existing_id_q)
+                .execute(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(AppError::from)?;
         existing_user.id
     } else {
         let new_user_id = Uuid::new_v4().to_string();
-        query(
-            r#"
+        let new_user_id_q = new_user_id.clone();
+        let email_q2 = request.email.clone();
+        let name_q = request.name.clone();
+        let picture_q = request.picture.clone();
+        let auth_method_q = request.auth_method.clone();
+        let provider_q = request.provider.clone();
+        let provider_id_q = request.provider_id.clone();
+        let platform_q = request.platform.clone();
+        let now_ts = datetime_to_timestamp(now);
+        handles
+            .db
+            .run(move |mut db| async move {
+                query(
+                    r#"
             INSERT INTO users (
                 id, email, name, picture, auth_method, provider, provider_id,
                 last_login_platform, last_login_at, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
-        )
-        .bind(&new_user_id)
-        .bind(&request.email)
-        .bind(&request.name)
-        .bind(&request.picture)
-        .bind(&request.auth_method)
-        .bind(&request.provider)
-        .bind(&request.provider_id)
-        .bind(&request.platform)
-        .bind(datetime_to_timestamp(now))
-        .bind(datetime_to_timestamp(now))
-        .bind(datetime_to_timestamp(now))
-        .execute(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
-
+                )
+                .bind(&new_user_id_q)
+                .bind(&email_q2)
+                .bind(&name_q)
+                .bind(&picture_q)
+                .bind(&auth_method_q)
+                .bind(&provider_q)
+                .bind(&provider_id_q)
+                .bind(&platform_q)
+                .bind(now_ts)
+                .bind(now_ts)
+                .bind(now_ts)
+                .execute(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(AppError::from)?;
         new_user_id
     };
 
     // Get the final user data
-    let final_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&mut db.conn)
+    let user_id_q = user_id.clone();
+    let final_user = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<User>("SELECT * FROM users WHERE id = ?")
+                .bind(&user_id_q)
+                .fetch_one(&mut db.conn)
+                .await
+        })
         .await
         .map_err(AppError::from)?;
 
@@ -253,24 +301,36 @@ pub async fn create_user_internal(
 
 /// Internal endpoint to create web sessions
 pub async fn create_session_internal(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<SessionRequest>,
 ) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
-    validate_internal_service(&headers, &env).await?;
+    validate_internal_service(&headers).await?;
 
     // Generate session token and create session
     let token = session::generate_session_token();
-    let session = session::create_session(&mut db, &token, &request.user_id)
-        .await
-        .map_err(AppError::from)?;
+    let token_q = token.clone();
+    let user_id_q = request.user_id.clone();
+    let session =
+        handles
+            .db
+            .run(move |mut db| async move {
+                session::create_session(&mut db, &token_q, &user_id_q).await
+            })
+            .await
+            .map_err(AppError::from)?;
 
     // Get user details
-    let user = query_as::<User>("SELECT * FROM users WHERE id = ?")
-        .bind(&request.user_id)
-        .fetch_optional(&mut db.conn)
+    let user_id_q2 = request.user_id.clone();
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<User>("SELECT * FROM users WHERE id = ?")
+                .bind(&user_id_q2)
+                .fetch_optional(&mut db.conn)
+                .await
+        })
         .await
         .map_err(AppError::from)?;
 
@@ -299,155 +359,33 @@ pub async fn create_session_internal(
     }
 }
 
-/// Internal endpoint to create API tokens
+/// Internal endpoint to create API tokens (deprecated)
 pub async fn create_tokens_internal(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    Extension(_handles): Extension<SharedHandles>,
     headers: HeaderMap,
-    JsonExtractor(request): JsonExtractor<CreateUserRequest>,
+    JsonExtractor(_request): JsonExtractor<CreateUserRequest>,
 ) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
-    validate_internal_service(&headers, &env).await?;
+    validate_internal_service(&headers).await?;
 
-    // Validate platform and attestation
-    match request.platform.as_str() {
-        "web" => {
-            // Web platform is validated by the internal service call itself
-            // Nothing additional needed
-        }
-        "ios" => {
-            // Validate iOS user agent
-            let ua = request.user_agent.as_deref().unwrap_or("");
-            if !ua.contains("CFNetwork") && !ua.contains("hamrahIOS") {
-                return Err("Invalid iOS client".to_string().into());
-            }
-
-            // Check if request is from iOS Simulator
-            if app_attestation::is_ios_simulator(request.user_agent.as_deref()) {
-                // Simulator validation passes
-            } else {
-                // For real devices, require App Attestation
-                let _attestation_token = request
-                    .client_attestation
-                    .as_deref()
-                    .ok_or_else(|| "iOS App Attestation required".to_string())?;
-
-                // Validate the attestation token
-            }
-        }
-        _ => {
-            return Err(Box::new(AppError::bad_request("Unsupported platform")));
-        }
-    }
-
-    // Log the incoming request for debugging
-
-    // Validate email is present and not empty
-    if request.email.trim().is_empty() {
-        console_log!(
-            "create_user_internal: Email is empty for provider={}",
-            request.provider
-        );
-        return Err(Box::new(AppError::bad_request(
-            "Email is required for authentication",
-        )));
-    }
-
-    let _now = Utc::now();
-
-    // Find or create user by email
-    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
-        .bind(&request.email)
-        .fetch_optional(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
-
-    let user_id = if let Some(existing_user) = user {
-        existing_user.id
-    } else {
-        // Create new user
-        let new_user_id = Uuid::new_v4().to_string();
-        let now = Utc::now();
-
-        query(
-            r#"
-            INSERT INTO users (
-                id, email, name, picture, email_verified, auth_method,
-                provider, provider_id, last_login_platform, last_login_at,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(&new_user_id)
-        .bind(&request.email)
-        .bind(&request.name)
-        .bind(&request.picture)
-        .bind(datetime_to_timestamp(now))
-        .bind(&request.auth_method)
-        .bind(&request.provider)
-        .bind(&request.provider_id)
-        .bind(&request.platform)
-        .bind(datetime_to_timestamp(now))
-        .bind(datetime_to_timestamp(now))
-        .bind(datetime_to_timestamp(now))
-        .execute(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
-
-        new_user_id
-    };
-
-    // Create token pair
-    let token_pair = tokens::create_token_pair(
-        &mut db,
-        &user_id,
-        &request.platform,
-        request.user_agent.as_deref(),
-        None, // IP address handled by web layer
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    // Get updated user
-    let final_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user_id)
-        .fetch_one(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
-
-    let user_response = UserResponse {
-        id: final_user.id,
-        email: final_user.email,
-        name: final_user.name,
-        picture: final_user.picture,
-        auth_method: final_user.auth_method,
-        created_at: timestamp_to_datetime(final_user.created_at).to_rfc3339(),
-    };
-
-    let expires_in =
-        ((token_pair.access_expires_at - datetime_to_timestamp(Utc::now())) / 1000).max(0);
-
-    Ok(Json(InternalAuthResponse {
-        success: true,
-        user: Some(user_response),
-        access_token: Some(token_pair.access_token),
-        refresh_token: Some(token_pair.refresh_token),
-        expires_in: Some(expires_in),
-        error: None,
-    }))
+    Err(Box::new(AppError::bad_request(
+        "create_tokens_internal is deprecated",
+    )))
 }
 
 /// Internal session validation
 pub async fn validate_session_internal(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<SessionValidationRequest>,
 ) -> AppResult<Json<InternalAuthResponse>> {
     // Validate internal service call
-    validate_internal_service(&headers, &env).await?;
+    validate_internal_service(&headers).await?;
 
-    if let Some((_session, user)) = session::validate_session_token(&mut db, &request.session_token)
+    let token_q = request.session_token.clone();
+    if let Some((_session, user)) = handles
+        .db
+        .run(move |mut db| async move { session::validate_session_token(&mut db, &token_q).await })
         .await
         .map_err(|e| e.to_string())?
     {
@@ -474,22 +412,27 @@ pub async fn validate_session_internal(
 
 /// Internal endpoint to check if a user exists by email (service-to-service only)
 pub async fn check_user_by_email_internal(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<serde_json::Value>,
 ) -> AppResult<Json<serde_json::Value>> {
     // Validate internal service call
-    validate_internal_service(&headers, &env).await?;
+    validate_internal_service(&headers).await?;
 
     let email = request
         .get("email")
         .and_then(|e| e.as_str())
         .ok_or_else(|| "Email is required".to_string())?;
 
-    let user = query_as::<User>("SELECT * FROM users WHERE email = ?")
-        .bind(email)
-        .fetch_optional(&mut db.conn)
+    let email_q = email.to_string();
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<User>("SELECT * FROM users WHERE email = ?")
+                .bind(&email_q)
+                .fetch_optional(&mut db.conn)
+                .await
+        })
         .await
         .map_err(AppError::from)?;
 

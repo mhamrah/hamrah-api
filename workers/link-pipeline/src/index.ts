@@ -2,7 +2,6 @@ import { WorkflowEntrypoint, WorkflowEvent, WorkflowStep, WorkerEntrypoint } fro
 
 interface Env {
   DB: D1Database;
-  ARCHIVES: R2Bucket;
   AI: Ai; // Workers AI binding: configured in wrangler as [ai] binding = "AI"
   // Binding below is configured in wrangler under [[workflows]]
   LINK_PIPELINE: Workflow;
@@ -33,9 +32,6 @@ type LinkRow = {
   word_count: number | null;
   reading_time_sec: number | null;
   content_hash: string | null;
-  archive_etag: string | null;
-  archive_bytes: number | null;
-  archive_r2_key: string | null;
   save_count: number;
   created_at: string;
   updated_at: string;
@@ -106,16 +102,7 @@ export class LinkPipelineWorkflow extends WorkflowEntrypoint<Env, LinkPipelinePa
 
     const textForSummary = extracted.mainText || fallbackText(fetchResult.html!);
 
-    // Step 3: Archive to R2 (raw HTML)
-    const archive = await step.do("archive-r2", async () => {
-      const key = r2KeyForLink(userId, linkId);
-      const putRes = await this.env.ARCHIVES.put(key, fetchResult.html!, {
-        httpMetadata: { contentType: "text/html; charset=utf-8" },
-      });
-      const etag = putRes?.etag ?? null;
-      const size = putRes?.size ?? fetchResult.html!.length;
-      return { key, etag, bytes: size };
-    });
+    // Step 3: Skipped - R2 archiving removed
 
     // Step 4: Compute content hash and stats
     const stats = await step.do("hash-and-stats", async () => {
@@ -193,9 +180,6 @@ export class LinkPipelineWorkflow extends WorkflowEntrypoint<Env, LinkPipelinePa
             word_count = ?,
             reading_time_sec = ?,
             content_hash = ?,
-            archive_etag = ?,
-            archive_bytes = ?,
-            archive_r2_key = ?,
             state = 'ready',
             ready_at = ?,
             updated_at = ?
@@ -214,9 +198,6 @@ export class LinkPipelineWorkflow extends WorkflowEntrypoint<Env, LinkPipelinePa
             stats.wc,
             stats.rtimeSec,
             stats.hash,
-            archive.etag,
-            archive.bytes,
-            archive.key,
             now,
             now,
             linkId,
@@ -324,9 +305,7 @@ function isPublicHttpUrl(urlStr: string): boolean {
   }
 }
 
-function r2KeyForLink(userId: string, linkId: string): string {
-  return `archives/${userId}/${linkId}.html`;
-}
+
 
 async function markFailed(db: D1Database, linkId: string, reason: string) {
   const now = new Date().toISOString();

@@ -45,9 +45,8 @@ impl Database {
                 state, failure_reason, title, description, site_name, favicon_url, image_url,
                 summary_short, summary_long, primary_summary_model_id, lang,
                 word_count, reading_time_sec, content_hash,
-                archive_etag, archive_bytes, archive_r2_key,
                 save_count, created_at, updated_at, ready_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&link.id)
@@ -70,9 +69,6 @@ impl Database {
         .bind(link.word_count)
         .bind(link.reading_time_sec)
         .bind(&link.content_hash)
-        .bind(&link.archive_etag)
-        .bind(link.archive_bytes)
-        .bind(&link.archive_r2_key)
         .bind(link.save_count)
         .bind(&link.created_at)
         .bind(&link.updated_at)

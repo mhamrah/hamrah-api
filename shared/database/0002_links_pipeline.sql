@@ -1,6 +1,6 @@
 hamrah-api/migrations/0002_links_pipeline.sql
 ```
--- Links, Processing, Summaries, Archives, Delta Sync, Pushes Schema Migration
+-- Links, Processing, Summaries, Delta Sync, Pushes Schema Migration
 
 -- LINKS TABLE
 CREATE TABLE IF NOT EXISTS links (
@@ -24,9 +24,7 @@ CREATE TABLE IF NOT EXISTS links (
     word_count INTEGER,
     reading_time_sec INTEGER,
     content_hash TEXT,
-    archive_etag TEXT,
-    archive_bytes INTEGER,
-    archive_r2_key TEXT,
+
     save_count INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

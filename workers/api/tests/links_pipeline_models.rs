@@ -24,9 +24,7 @@ fn test_link_struct_serialization() {
         word_count: Some(100),
         reading_time_sec: Some(30),
         content_hash: Some("abcdef".to_string()),
-        archive_etag: Some("etag123".to_string()),
-        archive_bytes: Some(2048),
-        archive_r2_key: Some("archives/user1/01HXYZ.zip".to_string()),
+
         save_count: 2,
         created_at: "2024-06-01T12:00:00Z".to_string(),
         updated_at: "2024-06-01T12:01:00Z".to_string(),

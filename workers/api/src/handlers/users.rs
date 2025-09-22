@@ -2,13 +2,9 @@ use crate::auth::{session, tokens};
 use crate::db::{schema::User, Database};
 use crate::error::{AppError, AppResult};
 use crate::handlers::auth::UserResponse;
+
 use crate::utils::{datetime_to_timestamp, timestamp_to_datetime};
-use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
-    response::Json,
-    Json as JsonExtractor,
-};
+use axum::{extract::Path, http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx_d1::{query_as, FromRow};
@@ -165,10 +161,19 @@ pub async fn get_current_user_from_request(
 }
 
 pub async fn get_current_user(
-    State(mut db): State<Database>,
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
     headers: HeaderMap,
 ) -> AppResult<Json<UserResponse>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    let headers_clone = headers.clone();
+    let user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
 
     let user_response = UserResponse {
         id: user.id,
@@ -185,12 +190,20 @@ pub async fn get_current_user(
 }
 
 pub async fn get_user_by_id(
-    State(mut db): State<Database>,
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> AppResult<Json<UserResponse>> {
-    // Verify the requesting user has permission (for now, users can only get their own info)
-    let current_user = get_current_user_from_request(&mut db, &headers).await?;
+    let headers_clone = headers.clone();
+    let current_user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
 
     if current_user.id != user_id {
         return Err(Box::new(AppError::forbidden("Forbidden")));
@@ -211,38 +224,66 @@ pub async fn get_user_by_id(
 }
 
 pub async fn update_current_user(
-    State(mut db): State<Database>,
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
     headers: HeaderMap,
     JsonExtractor(request): JsonExtractor<UpdateUserRequest>,
 ) -> AppResult<Json<UserResponse>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    let headers_clone = headers.clone();
+    let user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
 
     let now = datetime_to_timestamp(Utc::now());
 
-    sqlx_d1::query(
-        r#"
+    {
+        let user_id_q = user.id.clone();
+        let name_q = request.name.clone();
+        let picture_q = request.picture.clone();
+        let now_q = now;
+        handles
+            .db
+            .run(move |mut db| async move {
+                sqlx_d1::query(
+                    r#"
         UPDATE users
         SET name = CASE WHEN ? IS NOT NULL THEN ? ELSE name END,
             picture = CASE WHEN ? IS NOT NULL THEN ? ELSE picture END,
             updated_at = ?
         WHERE id = ?
         "#,
-    )
-    .bind(request.name.as_ref())
-    .bind(request.name.as_ref())
-    .bind(request.picture.as_ref())
-    .bind(request.picture.as_ref())
-    .bind(now)
-    .bind(&user.id)
-    .execute(&mut db.conn)
-    .await
-    .map_err(AppError::from)?;
+                )
+                .bind(name_q.as_ref())
+                .bind(name_q.as_ref())
+                .bind(picture_q.as_ref())
+                .bind(picture_q.as_ref())
+                .bind(now_q)
+                .bind(&user_id_q)
+                .execute(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(AppError::from)?;
+    }
 
-    let updated_user = query_as::<User>("SELECT * FROM users WHERE id = ?")
-        .bind(&user.id)
-        .fetch_one(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
+    let updated_user = {
+        let user_id_q = user.id.clone();
+        handles
+            .db
+            .run(move |mut db| async move {
+                query_as::<User>("SELECT * FROM users WHERE id = ?")
+                    .bind(&user_id_q)
+                    .fetch_one(&mut db.conn)
+                    .await
+            })
+            .await
+            .map_err(AppError::from)?
+    };
 
     let user_response = UserResponse {
         id: updated_user.id,
@@ -259,25 +300,43 @@ pub async fn update_current_user(
 }
 
 pub async fn get_user_tokens(
-    State(mut db): State<Database>,
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
     headers: HeaderMap,
 ) -> AppResult<Json<UserTokensResponse>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    let headers_clone = headers.clone();
+    let user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
 
     let now = datetime_to_timestamp(Utc::now());
-    let results = query_as::<UserTokenInfo>(
-        r#"
+    let results = {
+        let user_id_q = user.id.clone();
+        let now_q = now;
+        handles
+            .db
+            .run(move |mut db| async move {
+                query_as::<UserTokenInfo>(
+                    r#"
         SELECT id, platform, user_agent, last_used, created_at, access_expires_at
         FROM auth_tokens
         WHERE user_id = ? AND revoked = 0 AND access_expires_at > ?
         ORDER BY last_used DESC, created_at DESC
         "#,
-    )
-    .bind(&user.id)
-    .bind(now)
-    .fetch_all(&mut db.conn)
-    .await
-    .map_err(AppError::from)?;
+                )
+                .bind(&user_id_q)
+                .bind(now_q)
+                .fetch_all(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(AppError::from)?
+    };
 
     Ok(Json(UserTokensResponse {
         success: true,
@@ -286,17 +345,34 @@ pub async fn get_user_tokens(
 }
 
 pub async fn delete_user_account(
-    State(mut db): State<Database>,
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    let headers_clone = headers.clone();
+    let user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
 
     // Delete user (cascading deletes will handle sessions, tokens, etc.)
-    sqlx_d1::query("DELETE FROM users WHERE id = ?")
-        .bind(&user.id)
-        .execute(&mut db.conn)
-        .await
-        .map_err(AppError::from)?;
+    {
+        let user_id_q = user.id.clone();
+        handles
+            .db
+            .run(move |mut db| async move {
+                sqlx_d1::query("DELETE FROM users WHERE id = ?")
+                    .bind(&user_id_q)
+                    .execute(&mut db.conn)
+                    .await
+            })
+            .await
+            .map_err(AppError::from)?;
+    }
 
     Ok(Json(serde_json::json!({
         "success": true,

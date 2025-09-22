@@ -96,6 +96,7 @@ Internal (service-to-service)
 
 Public Authentication
 - GET /api/auth/sessions/validate — Validate session
+- GET /api/auth/tokens/validate — Validate access token (Bearer) and return validity/expiry metadata
 - POST /api/auth/sessions/logout — Logout session
 - POST /api/auth/tokens/refresh — Refresh access token
 - DELETE /api/auth/tokens/:token_id/revoke — Revoke specific token
@@ -116,6 +117,15 @@ User Management
 - DELETE /api/users/me — Delete account
 - GET /api/users/me/tokens — List active tokens
 - GET /api/users/:user_id — Get user by ID
+
+### Authentication Endpoint Details
+
+- GET /api/auth/tokens/validate
+  - Purpose: Lightweight validation of Bearer access token without fetching user profile
+  - Auth: Authorization: Bearer <access_token>
+  - Success (200): { success: true, valid: true, userId, platform, accessExpiresAt, expiresIn }
+  - Failure (401): Unauthorized when token is missing, invalid, expired, or revoked
+  - Notes: Does not rotate tokens and does not return user profile; prefer GET /api/users/me when user data is needed
 
 ---
 

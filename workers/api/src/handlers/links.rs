@@ -1,64 +1,59 @@
-use crate::db::Database;
 use crate::error::{AppError, AppResult};
+use crate::handlers::common::{LinkCompactItem, PostLinkItem, PostLinksBody};
 use crate::handlers::users::get_current_user_from_request;
+use crate::shared_handles::SharedHandles;
 use crate::utils::{url_canonicalize, url_is_valid_public_http};
-use axum::{extract::State, http::HeaderMap, response::Json, Json as JsonExtractor};
+use axum::{
+    extract::{Extension, Json as JsonExtractor},
+    http::HeaderMap,
+    response::Json,
+};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+// removed unused import: serde::{Deserialize, Serialize}
 use serde_json::json;
 use sqlx_d1::{query, query_as};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
-pub struct PostLinkItem {
-    url: String,
-    #[serde(rename = "clientId")]
-    client_id: Option<String>,
-    #[serde(rename = "sourceApp")]
-    source_app: Option<String>,
-    #[serde(rename = "sharedText")]
-    shared_text: Option<String>,
-}
+/* PostLinkItem moved to handlers::common::types */
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum PostLinksBody {
-    Single(PostLinkItem),
-    Batch { links: Vec<PostLinkItem> },
-}
+/* PostLinksBody moved to handlers::common::types */
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
-struct LinkCompactItem {
-    id: String,
-    canonical_url: String,
-    updated_at: String,
-    state: String,
-}
+/* LinkCompactItem moved to handlers::common::types */
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
-struct LinkListItem {
-    id: String,
-    canonical_url: String,
-    original_url: String,
-    state: String,
-    save_count: i64,
-    created_at: String,
-    updated_at: String,
-    title: Option<String>,
-    description: Option<String>,
-    site_name: Option<String>,
-    image_url: Option<String>,
-    favicon_url: Option<String>,
-}
+/* LinkListItem moved to handlers::common::types */
 
 /// POST /v1/links - create or upsert links for current user
+// debug_handler removed to satisfy Handler trait bound
 pub async fn post_links(
-    State(mut db): State<Database>,
+    Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
     JsonExtractor(body): JsonExtractor<PostLinksBody>,
 ) -> AppResult<Json<serde_json::Value>> {
-    // Get current user from auth headers
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    // Convert headers to owned string pairs to avoid borrowing non-Send types across await
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
+    let user = handles
+        .db
+        .run(move |mut db| async move {
+            // Rebuild a HeaderMap inside the DB executor from owned string pairs
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await?;
 
     // Convert body to items array
     let items: Vec<PostLinkItem> = match body {
@@ -97,102 +92,148 @@ pub async fn post_links(
         };
 
         // Check for existing link
-        let existing = query_as::<LinkCompactItem>(
-            r#"
+        let user_id_q = user.id.clone();
+        let canonical_url_q = canonical_url.clone();
+        let existing = handles
+            .db
+            .run(move |mut db| async move {
+                query_as::<LinkCompactItem>(
+                    r#"
             SELECT id, canonical_url, updated_at, state
             FROM links
             WHERE user_id = ? AND canonical_url = ?
             "#,
-        )
-        .bind(&user.id)
-        .bind(&canonical_url)
-        .fetch_optional(&mut db.conn)
-        .await
-        .map_err(|e| AppError::from(e))?;
+                )
+                .bind(&user_id_q)
+                .bind(&canonical_url_q)
+                .fetch_optional(&mut db.conn)
+                .await
+            })
+            .await
+            .map_err(AppError::from)?;
 
         let link_id = if let Some(row) = existing {
-            // Update existing link
-            query(
-                r#"
+            // Update existing link (no metadata fetching here)
+            {
+                let now_iso_q = now_iso.clone();
+                let row_id_q = row.id.clone();
+                handles
+                    .db
+                    .run(move |mut db| async move {
+                        query(
+                            r#"
                 UPDATE links
                 SET save_count = save_count + 1,
                     updated_at = ?
                 WHERE id = ?
                 "#,
-            )
-            .bind(&now_iso)
-            .bind(&row.id)
-            .execute(&mut db.conn)
-            .await
-            .map_err(|e| AppError::from(e))?;
+                        )
+                        .bind(&now_iso_q)
+                        .bind(&row_id_q)
+                        .execute(&mut db.conn)
+                        .await
+                    })
+                    .await
+                    .map_err(AppError::from)?;
+            }
 
             row.id
         } else {
-            // Create new link
+            // Create new link (minimal fields)
             let new_id = Uuid::new_v4().to_string();
-            query(
-                r#"
+            {
+                let new_id_q = new_id.clone();
+                let user_id_q = user.id.clone();
+                let url_q = item.url.clone();
+                let canonical_q = canonical_url.clone();
+                let host_q = host.clone();
+                let now_q = now_iso.clone();
+                handles
+                    .db
+                    .run(move |mut db| async move {
+                        query(
+                            r#"
                 INSERT INTO links (
                     id, user_id, original_url, canonical_url, host,
                     state, save_count, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, 'new', 1, ?, ?)
                 "#,
-            )
-            .bind(&new_id)
-            .bind(&user.id)
-            .bind(&item.url)
-            .bind(&canonical_url)
-            .bind(&host)
-            .bind(&now_iso)
-            .bind(&now_iso)
-            .execute(&mut db.conn)
-            .await
-            .map_err(|e| AppError::from(e))?;
+                        )
+                        .bind(&new_id_q)
+                        .bind(&user_id_q)
+                        .bind(&url_q)
+                        .bind(&canonical_q)
+                        .bind(&host_q)
+                        .bind(&now_q)
+                        .bind(&now_q)
+                        .execute(&mut db.conn)
+                        .await
+                    })
+                    .await
+                    .map_err(AppError::from)?;
+            }
 
             new_id
         };
 
         // Record the save
         let save_id = Uuid::new_v4().to_string();
-        query(
-            r#"
+        {
+            let save_id_q = save_id.clone();
+            let link_id_q = link_id.clone();
+            let user_id_q = user.id.clone();
+            let source_app_q = item.source_app.clone();
+            let shared_text_q = item.shared_text.clone();
+            let now_q = now_iso.clone();
+            handles
+                .db
+                .run(move |mut db| async move {
+                    query(
+                        r#"
             INSERT INTO link_saves (
                 id, link_id, user_id, source_app, shared_text, shared_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
-        )
-        .bind(&save_id)
-        .bind(&link_id)
-        .bind(&user.id)
-        .bind(&item.source_app)
-        .bind(&item.shared_text)
-        .bind::<Option<String>>(None)
-        .bind(&now_iso)
-        .execute(&mut db.conn)
-        .await
-        .map_err(|e| AppError::from(e))?;
+                    )
+                    .bind(&save_id_q)
+                    .bind(&link_id_q)
+                    .bind(&user_id_q)
+                    .bind(&source_app_q)
+                    .bind(&shared_text_q)
+                    .bind::<Option<String>>(None)
+                    .bind(&now_q)
+                    .execute(&mut db.conn)
+                    .await
+                })
+                .await
+                .map_err(AppError::from)?;
+        }
 
-        // Get the current link state for response
-        let link = query_as::<LinkListItem>(
-            r#"
-            SELECT id, canonical_url, original_url, state, save_count,
-                   created_at, updated_at, title, description, site_name, image_url, favicon_url
-            FROM links WHERE id = ?
-            "#,
-        )
-        .bind(&link_id)
-        .fetch_one(&mut db.conn)
-        .await
-        .map_err(|e| AppError::from(e))?;
+        // Trigger background processing immediately (fire-and-forget)
+        {
+            let link_id2 = link_id.clone();
+            let user_id2 = user.id.clone();
+            let _ = handles
+                .env
+                .run(move |env| async move {
+                    crate::pipeline_shim::try_trigger_pipeline_for_link(&env, &link_id2, &user_id2)
+                        .await;
+                    Ok::<(), ()>(())
+                })
+                .await;
+        }
 
-        results.push(serde_json::to_value(link).unwrap());
-
-        // TODO: Trigger background processing when env is available
-        // let _ = crate::pipeline_shim::try_trigger_pipeline_for_link(&env, &link_id, &user.id).await;
+        // Minimal response entry
+        results.push(json!({
+            "id": link_id,
+            "canonical_url": canonical_url
+        }));
     }
 
-    Ok(Json(json!({
-        "success": true,
-        "links": results
-    })))
+    // Return single-link shape for single item to match client expectations
+    if results.len() == 1 {
+        Ok(Json(results.remove(0)))
+    } else {
+        Ok(Json(json!({ "results": results })))
+    }
 }
