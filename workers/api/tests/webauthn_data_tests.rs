@@ -168,8 +168,8 @@ mod tests {
             "credential_backed_up": credential_backed_up
         });
 
-        assert_eq!(json["user_verified"], true);
-        assert_eq!(json["credential_backed_up"], false);
+        assert!(json["user_verified"] == true);
+        assert!(json["credential_backed_up"] == false);
     }
 
     #[test]

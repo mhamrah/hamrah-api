@@ -224,7 +224,6 @@ pub async fn enforce_request_attestation_from_headers(
     strict_verify: bool,
 ) -> Result<(), String> {
     // Dev/simulator bypass (opt-in via env)
-    let dev_bypass = dev_bypass;
 
     // Simulator detection via UA or explicit header from app
     let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
@@ -312,7 +311,6 @@ pub async fn enforce_request_attestation_from_headers(
 
     // Signature verification using stored XY (base64 of X||Y) when available.
     // When APP_ATTEST_VERIFY_SIGNATURE_STRICT=true/1/yes, enforce verification; otherwise best-effort/log-only.
-    let strict_verify = strict_verify;
 
     if let Ok(Some((public_key_opt,))) = sqlx_d1::query_as::<(Option<String>,)>(
         "SELECT public_key FROM app_attest_keys WHERE key_id = ? LIMIT 1",
@@ -382,14 +380,12 @@ pub async fn enforce_request_attestation_from_headers(
                 if !payload_matches {
                     return Err("App Attest payload does not match challenge hash".to_string());
                 }
-            } else {
-                if vk.verify(&tbs, &sig).is_ok() {
-                    if !payload_matches {
-                        console_log!("App Attestation: payload != SHA256(challenge) (non-strict)");
-                    }
-                } else {
-                    console_log!("App Attestation: signature verification failed (non-strict). Set APP_ATTEST_VERIFY_SIGNATURE_STRICT=true to enforce.");
+            } else if vk.verify(&tbs, &sig).is_ok() {
+                if !payload_matches {
+                    console_log!("App Attestation: payload != SHA256(challenge) (non-strict)");
                 }
+            } else {
+                console_log!("App Attestation: signature verification failed (non-strict). Set APP_ATTEST_VERIFY_SIGNATURE_STRICT=true to enforce.");
             }
         } else {
             console_log!("App Attestation: no public_key stored; skipping signature verification (TODO: extract and store from attestation).");
@@ -430,10 +426,7 @@ pub async fn require_ios_app_attestation(req: AxumRequest, next: Next) -> Respon
                     )
                 })
                 .await;
-            match res {
-                Ok(b) => b,
-                Err(_) => false,
-            }
+            res.unwrap_or_default()
         };
 
         let strict_verify = {
@@ -451,10 +444,7 @@ pub async fn require_ios_app_attestation(req: AxumRequest, next: Next) -> Respon
                     )
                 })
                 .await;
-            match res {
-                Ok(b) => b,
-                Err(_) => false,
-            }
+            res.unwrap_or_default()
         };
 
         // Capture headers as owned (String, String) pairs for the DB task

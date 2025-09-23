@@ -61,7 +61,7 @@ pub async fn get_link_by_id(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     match link {
         Some(link) => Ok(Json(serde_json::to_value(link).unwrap())),
@@ -115,7 +115,7 @@ pub async fn patch_link_by_id(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     if link_exists.is_none() {
         return Err(Box::new(AppError::not_found("Link not found")));
@@ -172,7 +172,7 @@ pub async fn patch_link_by_id(
             q.execute(&mut db.conn).await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     // Return updated link
     let id_q = id.clone();
@@ -192,7 +192,7 @@ pub async fn patch_link_by_id(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(serde_json::to_value(updated_link).unwrap()))
 }
@@ -244,7 +244,7 @@ pub async fn delete_link_by_id(
             Ok::<u64, sqlx_d1::Error>(res.rows_affected as u64)
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     if rows_affected == 0 {
         return Err(Box::new(AppError::not_found("Link not found")));

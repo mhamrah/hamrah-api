@@ -56,7 +56,7 @@ pub async fn get_user_prefs(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     match prefs {
         Some(row) => Ok(Json(json!({
@@ -122,7 +122,7 @@ pub async fn put_user_prefs(
                 .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     if exists.is_some() {
         // Update existing preferences
@@ -150,7 +150,7 @@ pub async fn put_user_prefs(
                 .await
             })
             .await
-            .map_err(|e| AppError::from(e))?;
+            .map_err(AppError::from)?;
     } else {
         // Insert new preferences
         let user_id_q3 = user.id.clone();
@@ -177,7 +177,7 @@ pub async fn put_user_prefs(
                 .await
             })
             .await
-            .map_err(|e| AppError::from(e))?;
+            .map_err(AppError::from)?;
     }
 
     // Return updated preferences
@@ -198,7 +198,7 @@ pub async fn put_user_prefs(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(json!({
         "user_id": updated_prefs.user_id,

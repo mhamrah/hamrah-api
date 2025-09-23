@@ -712,17 +712,17 @@ pub async fn app_attestation_verify(
                     .await;
             }
 
-            return Ok(Json(AttestationVerifyResponse {
+            Ok(Json(AttestationVerifyResponse {
                 success: true,
                 error: None,
-            }));
+            }))
         }
         Err(err) => {
             console_log!("❌ Apple App Attestation verification failed: {}", err);
-            return Ok(Json(AttestationVerifyResponse {
+            Ok(Json(AttestationVerifyResponse {
                 success: false,
                 error: Some("Attestation verification failed".to_string()),
-            }));
+            }))
         }
     }
 }

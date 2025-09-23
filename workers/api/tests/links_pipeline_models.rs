@@ -1,5 +1,4 @@
 use hamrah_api::db::schema::*;
-use serde_json;
 
 #[test]
 fn test_link_struct_serialization() {

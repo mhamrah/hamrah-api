@@ -11,7 +11,7 @@ This executor is designed for Cloudflare Workers (WASM) + Axum:
 
 Notes:
 - This file depends on `wasm-bindgen-futures` for `spawn_local`. If not present, add:
-    wasm-bindgen-futures = "0.4"
+  wasm-bindgen-futures = "0.4"
   to Cargo.toml [dependencies].
 */
 
@@ -260,7 +260,7 @@ impl Actor {
 }
 
 thread_local! {
-    static ACTOR: RefCell<Option<Actor>> = RefCell::new(None);
+    static ACTOR: RefCell<Option<Actor>> = const { RefCell::new(None) };
 }
 
 // -------------------------------------------------------------------------------------------------

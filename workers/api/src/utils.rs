@@ -251,9 +251,9 @@ mod tests {
     fn test_bool_conversions() {
         assert_eq!(bool_to_int(true), 1);
         assert_eq!(bool_to_int(false), 0);
-        assert_eq!(int_to_bool(1), true);
-        assert_eq!(int_to_bool(0), false);
-        assert_eq!(int_to_bool(42), true);
+        assert!(int_to_bool(1));
+        assert!(!int_to_bool(0));
+        assert!(int_to_bool(42));
     }
 
     #[test]

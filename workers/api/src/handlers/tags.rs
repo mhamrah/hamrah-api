@@ -54,7 +54,7 @@ pub async fn get_link_tags(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     if link_exists.is_none() {
         return Err(Box::new(AppError::not_found("Link not found")));
@@ -78,7 +78,7 @@ pub async fn get_link_tags(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(json!({
         "link_id": id,
@@ -138,7 +138,7 @@ pub async fn get_user_tags(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(json!({ "tags": rows })))
 }

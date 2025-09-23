@@ -63,7 +63,7 @@ pub async fn post_push_register(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     if existing.is_some() {
         // Token already exists, update last_seen
@@ -85,7 +85,7 @@ pub async fn post_push_register(
                 .await
             })
             .await
-            .map_err(|e| AppError::from(e))?;
+            .map_err(AppError::from)?;
 
         return Ok(Json(json!({
             "success": true,
@@ -119,7 +119,7 @@ pub async fn post_push_register(
             .await
         })
         .await
-        .map_err(|e| AppError::from(e))?;
+        .map_err(AppError::from)?;
 
     Ok(Json(json!({
         "success": true,
