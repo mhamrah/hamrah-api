@@ -113,7 +113,7 @@ pub fn app_router() -> Router<()> {
                     get(handlers::user_prefs::get_user_prefs)
                         .put(handlers::user_prefs::put_user_prefs),
                 )
-                .route("/links/:id/tags", get(handlers::tags::get_link_tags))
+                .route("/links/{id}/tags", get(handlers::tags::get_link_tags))
                 .route("/users/me/tags", get(handlers::tags::get_user_tags))
                 .route("/summary/config", get(handlers::get_summary_config))
                 .route("/models", get(handlers::models::get_models))
