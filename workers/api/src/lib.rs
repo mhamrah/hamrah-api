@@ -101,7 +101,7 @@ pub fn app_router() -> Router<()> {
                     get(handlers::links_list::get_links_compact),
                 )
                 .route(
-                    "/links/:id",
+                    "/links/{id}",
                     get(handlers::links_detail::get_link_by_id)
                         .patch(handlers::links_detail::patch_link_by_id)
                         .delete(handlers::links_detail::delete_link_by_id),
