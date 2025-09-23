@@ -293,8 +293,8 @@ jobs:
   deploy-pipeline-preview:
     name: Deploy Pipeline Worker Preview
     runs-on: ubuntu-latest
-    needs: [detect-changes]
-    if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_env == 'preview'))
+    needs: [detect-changes, test-pipeline]
+    if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_env == 'preview')) && needs.detect-changes.outputs.pipeline == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -348,7 +348,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env preview --name ${{ env.PIPELINE_WORKER_NAME }}
+          command: deploy --name ${{ env.PIPELINE_WORKER_NAME }}
           workingDirectory: workers/link-pipeline
 
   deploy-api-production:
