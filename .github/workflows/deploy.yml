@@ -233,7 +233,7 @@ jobs:
   deploy-api-preview:
     name: Deploy API Worker Preview
     runs-on: ubuntu-latest
-    needs: [detect-changes, test-api, deploy-pipeline-preview]
+    needs: [detect-changes, test-api]
     if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_env == 'preview')) && needs.detect-changes.outputs.api == 'true'
     env:
       CARGO_TERM_COLOR: always
