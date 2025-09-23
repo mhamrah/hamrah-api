@@ -1,5 +1,8 @@
 #:schema node_modules/wrangler/config-schema.json
 name = "hamrah-link-pipeline"
+# CI note: For per-PR previews, the deploy workflow overrides the Worker name:
+# - hamrah-link-pipeline-pr-<PR_NUMBER> (for pull_request runs)
+# - hamrah-link-pipeline-manual-<RUN_NUMBER> (for manual workflow_dispatch runs)
 main = "dist/index.js"
 compatibility_date = "2025-09-15"
 compatibility_flags = ["nodejs_compat"]
@@ -32,6 +35,8 @@ enabled = true
 # Preview environment configuration
 [env.preview]
 name = "hamrah-link-pipeline-preview"
+# CI note: For per-PR previews, CI publishes with --env preview and a PR-specific --name,
+# overriding this default environment name. See the deploy workflow for details.
 
 [env.preview.ai]
 binding = "AI"
