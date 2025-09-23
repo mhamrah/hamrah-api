@@ -31,67 +31,118 @@ jobs:
   detect-changes:
     name: Detect Worker Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       api: ${{ steps.api.outputs.changed }}
       pipeline: ${{ steps.pipeline.outputs.changed }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Detect API Worker Changes
         id: api
         run: |
           BT="${{ github.event.inputs.build_target }}"
-          BEFORE="${{ github.event.before }}"
+          CURRENT_BRANCH="${{ github.ref_name }}"
           SHA="${{ github.sha }}"
-          # Fallback for manual dispatch where 'before' may be empty
-          if [ -z "$BEFORE" ]; then
-            BEFORE="$(git rev-parse HEAD^ 2>/dev/null || echo "")"
-            SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
-          fi
 
+          # Force rebuild if manually requested
           if [ "$BT" = "api" ] || [ "$BT" = "both" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
-          elif [ -n "$BEFORE" ] && [ -n "$SHA" ] && git diff --name-only "$BEFORE" "$SHA" | grep -q '^workers/api/'; then
+            echo "reason=manual_override" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for force rebuild markers in commit messages or PR
+          MSG="${{ github.event.head_commit.message }}"
+          TITLE="${{ github.event.pull_request.title }}"
+          BODY="${{ github.event.pull_request.body }}"
+          if echo "$MSG $TITLE $BODY" | grep -Ei '\[(full|rebuild)( api)?\]'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "reason=force_rebuild_marker" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine comparison base
+          if [ "$CURRENT_BRANCH" = "main" ]; then
+            # On main: compare against last successful deployment
+            # Get the last successful workflow run for main branch
+            LAST_SUCCESS=$(gh run list --branch main --workflow "Cloudflare Workers CI/CD" --status success --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null || echo "")
+            if [ -n "$LAST_SUCCESS" ] && [ "$LAST_SUCCESS" != "null" ] && [ "$LAST_SUCCESS" != "$SHA" ]; then
+              COMPARE_BASE="$LAST_SUCCESS"
+              echo "reason=main_vs_last_success" >> $GITHUB_OUTPUT
+            else
+              # Fallback: compare against previous commit
+              COMPARE_BASE="HEAD^"
+              echo "reason=main_vs_previous" >> $GITHUB_OUTPUT
+            fi
+          else
+            # On branch: compare against main to get full change set
+            COMPARE_BASE="origin/main"
+            echo "reason=branch_vs_main" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if API worker files changed
+          if git diff --name-only "$COMPARE_BASE" "$SHA" 2>/dev/null | grep -q '^workers/api/'; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
-            MSG="${{ github.event.head_commit.message }}"
-            TITLE="${{ github.event.pull_request.title }}"
-            BODY="${{ github.event.pull_request.body }}"
-            if echo "$MSG $TITLE $BODY" | grep -Ei '\[(full|rebuild)( api)?\]'; then
-              echo "changed=true" >> $GITHUB_OUTPUT
-            else
-              echo "changed=false" >> $GITHUB_OUTPUT
-            fi
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Detect Pipeline Worker Changes
         id: pipeline
         run: |
           BT="${{ github.event.inputs.build_target }}"
-          BEFORE="${{ github.event.before }}"
+          CURRENT_BRANCH="${{ github.ref_name }}"
           SHA="${{ github.sha }}"
-          # Fallback for manual dispatch where 'before' may be empty
-          if [ -z "$BEFORE" ]; then
-            BEFORE="$(git rev-parse HEAD^ 2>/dev/null || echo "")"
-            SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
-          fi
 
+          # Force rebuild if manually requested
           if [ "$BT" = "pipeline" ] || [ "$BT" = "both" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
-          elif [ -n "$BEFORE" ] && [ -n "$SHA" ] && git diff --name-only "$BEFORE" "$SHA" | grep -q '^workers/link-pipeline/'; then
+            echo "reason=manual_override" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for force rebuild markers in commit messages or PR
+          MSG="${{ github.event.head_commit.message }}"
+          TITLE="${{ github.event.pull_request.title }}"
+          BODY="${{ github.event.pull_request.body }}"
+          if echo "$MSG $TITLE $BODY" | grep -Ei '\[(full|rebuild)( pipeline)?\]'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "reason=force_rebuild_marker" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Determine comparison base
+          if [ "$CURRENT_BRANCH" = "main" ]; then
+            # On main: compare against last successful deployment
+            # Get the last successful workflow run for main branch
+            LAST_SUCCESS=$(gh run list --branch main --workflow "Cloudflare Workers CI/CD" --status success --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null || echo "")
+            if [ -n "$LAST_SUCCESS" ] && [ "$LAST_SUCCESS" != "null" ] && [ "$LAST_SUCCESS" != "$SHA" ]; then
+              COMPARE_BASE="$LAST_SUCCESS"
+              echo "reason=main_vs_last_success" >> $GITHUB_OUTPUT
+            else
+              # Fallback: compare against previous commit
+              COMPARE_BASE="HEAD^"
+              echo "reason=main_vs_previous" >> $GITHUB_OUTPUT
+            fi
+          else
+            # On branch: compare against main to get full change set
+            COMPARE_BASE="origin/main"
+            echo "reason=branch_vs_main" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if Pipeline worker files changed
+          if git diff --name-only "$COMPARE_BASE" "$SHA" 2>/dev/null | grep -q '^workers/link-pipeline/'; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
-            MSG="${{ github.event.head_commit.message }}"
-            TITLE="${{ github.event.pull_request.title }}"
-            BODY="${{ github.event.pull_request.body }}"
-            if echo "$MSG $TITLE $BODY" | grep -Ei '\[(full|rebuild)( pipeline)?\]'; then
-              echo "changed=true" >> $GITHUB_OUTPUT
-            else
-              echo "changed=false" >> $GITHUB_OUTPUT
-            fi
+            echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
   test-api:
@@ -215,12 +266,28 @@ jobs:
       - name: Install worker-build if needed
         run: which worker-build || cargo install -q worker-build
 
+      - name: Compute preview names
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "PREVIEW_ID=pr-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          else
+            echo "PREVIEW_ID=manual-${{ github.run_number }}" >> $GITHUB_ENV
+          fi
+          echo "PIPELINE_WORKER_NAME=hamrah-link-pipeline-${PREVIEW_ID}" >> $GITHUB_ENV
+          echo "API_WORKER_NAME=hamrah-api-${PREVIEW_ID}" >> $GITHUB_ENV
+
+      - name: Prepare dynamic preview config
+        run: |
+          cp wrangler.preview.toml wrangler.preview.dynamic.toml
+          sed -i.bak "s/service = \"hamrah-link-pipeline-preview\"/service = \"${PIPELINE_WORKER_NAME}\"/" wrangler.preview.dynamic.toml
+        working-directory: workers/api
+
       - name: Deploy API Preview
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --config wrangler.preview.toml
+          command: deploy --name ${{ env.API_WORKER_NAME }} --config wrangler.preview.dynamic.toml
           workingDirectory: workers/api
 
   deploy-pipeline-preview:
@@ -254,16 +321,34 @@ jobs:
 
       - name: Download Pipeline build artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: pipeline-dist
           path: workers/link-pipeline/dist
+
+      - name: Build dist if artifact missing
+        run: |
+          if [ ! -d "dist" ]; then
+            npm run build
+          fi
+        working-directory: workers/link-pipeline
+
+      - name: Compute preview names
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "PREVIEW_ID=pr-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          else
+            echo "PREVIEW_ID=manual-${{ github.run_number }}" >> $GITHUB_ENV
+          fi
+          echo "PIPELINE_WORKER_NAME=hamrah-link-pipeline-${PREVIEW_ID}" >> $GITHUB_ENV
+          echo "API_WORKER_NAME=hamrah-api-${PREVIEW_ID}" >> $GITHUB_ENV
 
       - name: Deploy Pipeline Preview
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env preview
+          command: deploy --name ${{ env.PIPELINE_WORKER_NAME }}
           workingDirectory: workers/link-pipeline
 
   deploy-api-production:

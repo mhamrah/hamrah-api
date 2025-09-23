@@ -7,7 +7,6 @@ export default defineConfig({
     environmentOptions: {
       bindings: {
         DB: 'TEST_DB',
-        ARCHIVES: 'TEST_ARCHIVES',
         AI: 'TEST_AI',
         LINK_PIPELINE: 'TEST_WORKFLOW'
       },

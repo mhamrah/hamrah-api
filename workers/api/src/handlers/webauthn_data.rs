@@ -4,19 +4,14 @@
 
 use crate::db::schema::{WebAuthnChallenge, WebAuthnCredential};
 use crate::utils::datetime_to_timestamp;
-use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
-    response::Json,
-    Json as JsonExtractor,
-};
+use axum::{extract::Path, http::HeaderMap, response::Json, Json as JsonExtractor};
 use base64::prelude::*;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx_d1::{query, query_as};
 
 use crate::error::{AppError, AppResult};
-use crate::AppState;
+use crate::shared_handles::SharedHandles;
 
 // Request/Response types for WebAuthn data operations
 #[derive(Debug, Deserialize, Serialize)]
@@ -79,7 +74,7 @@ pub struct ChallengeResponse {
 /// POST /api/webauthn/credentials
 /// Store a new WebAuthn credential
 pub async fn store_webauthn_credential(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     JsonExtractor(payload): JsonExtractor<StoreCredentialRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     let now = datetime_to_timestamp(Utc::now());
@@ -122,30 +117,44 @@ pub async fn store_webauthn_credential(
     );
 
     let insert_start = datetime_to_timestamp(Utc::now());
-    let result = query(
-        r#"INSERT INTO webauthn_credentials
-           (id, user_id, public_key, counter, transports, aaguid, credential_type,
-            user_verified, credential_device_type, credential_backed_up, name, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-    )
-    .bind(&payload.id)
-    .bind(&payload.user_id)
-    .bind(&public_key_b64)
-    .bind(payload.counter)
-    .bind(transports_json.as_deref())
-    .bind(aaguid_b64.as_deref())
-    .bind(&payload.credential_type)
-    .bind(if payload.user_verified { 1i64 } else { 0i64 }) // Convert bool to i64
-    .bind(payload.credential_device_type.as_deref())
-    .bind(if payload.credential_backed_up {
-        1i64
-    } else {
-        0i64
-    }) // Convert bool to i64
-    .bind(payload.name.as_deref())
-    .bind(now)
-    .execute(&mut state.db.conn)
-    .await;
+    let result = handles
+        .db
+        .run({
+            let id_q = payload.id.clone();
+            let user_id_q = payload.user_id.clone();
+            let public_key_b64_q = public_key_b64.clone();
+            let transports_json_q = transports_json.clone();
+            let aaguid_b64_q = aaguid_b64.clone();
+            let credential_type_q = payload.credential_type.clone();
+            let user_verified_q = if payload.user_verified { 1i64 } else { 0i64 };
+            let credential_device_type_q = payload.credential_device_type.clone();
+            let credential_backed_up_q = if payload.credential_backed_up { 1i64 } else { 0i64 };
+            let name_q = payload.name.clone();
+            let now_q = now;
+            move |mut db| async move {
+                query(
+                    r#"INSERT INTO webauthn_credentials
+                       (id, user_id, public_key, counter, transports, aaguid, credential_type,
+                        user_verified, credential_device_type, credential_backed_up, name, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+                )
+                .bind(&id_q)
+                .bind(&user_id_q)
+                .bind(&public_key_b64_q)
+                .bind(payload.counter)
+                .bind(transports_json_q.as_deref())
+                .bind(aaguid_b64_q.as_deref())
+                .bind(&credential_type_q)
+                .bind(user_verified_q)
+                .bind(credential_device_type_q.as_deref())
+                .bind(credential_backed_up_q)
+                .bind(name_q.as_deref())
+                .bind(now_q)
+                .execute(&mut db.conn)
+                .await
+            }
+        })
+        .await;
 
     match result {
         Ok(_) => {
@@ -180,7 +189,7 @@ pub async fn store_webauthn_credential(
 /// GET /api/webauthn/credentials/{credential_id}
 /// Get a specific WebAuthn credential by ID
 pub async fn get_webauthn_credential(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(credential_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
@@ -188,20 +197,27 @@ pub async fn get_webauthn_credential(
         credential_id
     );
     let query_start = datetime_to_timestamp(Utc::now());
-    let credential =
-        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
-            .bind(&credential_id)
-            .fetch_optional(&mut state.db.conn)
-            .await
-            .map_err(|e| {
-                worker::console_log!(
-                    "💽 WEBAUTHN/DB get_webauthn_credential: ERROR id={}; error={:?}",
-                    credential_id,
-                    e
-                );
-                format!("Database error: {:?}", e)
-            })
-            .map_err(AppError::from)?;
+    let credential = handles
+        .db
+        .run({
+            let credential_id_q = credential_id.clone();
+            move |mut db| async move {
+                query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+                    .bind(&credential_id_q)
+                    .fetch_optional(&mut db.conn)
+                    .await
+            }
+        })
+        .await
+        .map_err(|e| {
+            worker::console_log!(
+                "💽 WEBAUTHN/DB get_webauthn_credential: ERROR id={}; error={:?}",
+                credential_id,
+                e
+            );
+            format!("Database error: {:?}", e)
+        })
+        .map_err(AppError::from)?;
     let query_end = datetime_to_timestamp(Utc::now());
     worker::console_log!(
         "💽 WEBAUTHN/DB get_webauthn_credential: SUCCESS id={}; found={}; duration_ms={}",
@@ -272,7 +288,7 @@ pub async fn get_webauthn_credential(
 /// GET /api/webauthn/users/{user_id}/credentials
 /// Get all WebAuthn credentials for a user
 pub async fn get_user_webauthn_credentials(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(user_id): Path<String>,
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -283,11 +299,29 @@ pub async fn get_user_webauthn_credentials(
 
     // Authenticate user
     worker::console_log!("🔑 WEBAUTHN: Attempting to authenticate user...");
-    let current_user = match crate::handlers::users::get_current_user_from_request(
-        &mut state.db,
-        &headers,
-    )
-    .await
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
+    let current_user = match handles
+        .db
+        .run(move |mut db| async move {
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            crate::handlers::users::get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await
     {
         Ok(user) => {
             worker::console_log!(
@@ -322,12 +356,18 @@ pub async fn get_user_webauthn_credentials(
     worker::console_log!(
         "🔑 WEBAUTHN: ✅ Authorization successful - fetching credentials from database..."
     );
-    let credentials = match query_as::<WebAuthnCredential>(
-        "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
-    )
-    .bind(&user_id)
-    .fetch_all(&mut state.db.conn)
-    .await
+    let user_id_q = user_id.clone();
+    let credentials = match handles
+        .db
+        .run(move |mut db| async move {
+            query_as::<WebAuthnCredential>(
+                "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
+            )
+            .bind(&user_id_q)
+            .fetch_all(&mut db.conn)
+            .await
+        })
+        .await
     {
         Ok(creds) => {
             worker::console_log!(
@@ -446,7 +486,7 @@ pub async fn get_user_webauthn_credentials(
 /// PATCH /api/webauthn/credentials/{credential_id}/counter
 /// Update credential counter and last used timestamp
 pub async fn update_webauthn_credential_counter(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(credential_id): Path<String>,
     JsonExtractor(payload): JsonExtractor<UpdateCredentialCounterRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -458,11 +498,21 @@ pub async fn update_webauthn_credential_counter(
     );
     let start_ts = datetime_to_timestamp(Utc::now());
 
-    let result = query("UPDATE webauthn_credentials SET counter = ?, last_used = ? WHERE id = ?")
-        .bind(payload.counter)
-        .bind(payload.last_used)
-        .bind(&credential_id)
-        .execute(&mut state.db.conn)
+    let result = handles
+        .db
+        .run({
+            let credential_id_q = credential_id.clone();
+            let counter_q = payload.counter;
+            let last_used_q = payload.last_used;
+            move |mut db| async move {
+                query("UPDATE webauthn_credentials SET counter = ?, last_used = ? WHERE id = ?")
+                    .bind(counter_q)
+                    .bind(last_used_q)
+                    .bind(&credential_id_q)
+                    .execute(&mut db.conn)
+                    .await
+            }
+        })
         .await;
 
     match result {
@@ -498,7 +548,7 @@ pub async fn update_webauthn_credential_counter(
 /// DELETE /api/webauthn/credentials/{credential_id}
 /// Delete a WebAuthn credential
 pub async fn delete_webauthn_credential(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(credential_id): Path<String>,
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
@@ -507,8 +557,29 @@ pub async fn delete_webauthn_credential(
         credential_id
     );
     // Authenticate user
-    let current_user_res =
-        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await;
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
+    let current_user_res = handles
+        .db
+        .run(move |mut db| async move {
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            crate::handlers::users::get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await;
     let current_user = match current_user_res {
         Ok(u) => {
             worker::console_log!(
@@ -533,11 +604,18 @@ pub async fn delete_webauthn_credential(
         credential_id
     );
     let fetch_start = datetime_to_timestamp(Utc::now());
-    let credential_res =
-        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
-            .bind(&credential_id)
-            .fetch_optional(&mut state.db.conn)
-            .await;
+    let credential_res = handles
+        .db
+        .run({
+            let credential_id_q = credential_id.clone();
+            move |mut db| async move {
+                query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+                    .bind(&credential_id_q)
+                    .fetch_optional(&mut db.conn)
+                    .await
+            }
+        })
+        .await;
     let fetch_end = datetime_to_timestamp(Utc::now());
 
     let credential = match credential_res {
@@ -594,9 +672,17 @@ pub async fn delete_webauthn_credential(
         credential_id
     );
     let delete_start = datetime_to_timestamp(Utc::now());
-    let delete_res = query("DELETE FROM webauthn_credentials WHERE id = ?")
-        .bind(&credential_id)
-        .execute(&mut state.db.conn)
+    let delete_res = handles
+        .db
+        .run({
+            let credential_id_q = credential_id.clone();
+            move |mut db| async move {
+                query("DELETE FROM webauthn_credentials WHERE id = ?")
+                    .bind(&credential_id_q)
+                    .execute(&mut db.conn)
+                    .await
+            }
+        })
         .await;
     let delete_end = datetime_to_timestamp(Utc::now());
 
@@ -632,7 +718,7 @@ pub async fn delete_webauthn_credential(
 /// PATCH /api/webauthn/credentials/{credential_id}/name
 /// Update credential name
 pub async fn update_webauthn_credential_name(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(credential_id): Path<String>,
     headers: HeaderMap,
     JsonExtractor(payload): JsonExtractor<serde_json::Value>,
@@ -644,8 +730,29 @@ pub async fn update_webauthn_credential_name(
 
     // Authenticate user
     let auth_start = datetime_to_timestamp(Utc::now());
-    let current_user_res =
-        crate::handlers::users::get_current_user_from_request(&mut state.db, &headers).await;
+    let header_pairs: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), s.to_string()))
+        })
+        .collect();
+    let current_user_res = handles
+        .db
+        .run(move |mut db| async move {
+            let mut hdrs = HeaderMap::new();
+            for (k, v) in header_pairs {
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                    axum::http::HeaderValue::from_str(&v),
+                ) {
+                    hdrs.insert(name, value);
+                }
+            }
+            crate::handlers::users::get_current_user_from_request(&mut db, &hdrs).await
+        })
+        .await;
     let current_user = match current_user_res {
         Ok(u) => {
             let auth_end = datetime_to_timestamp(Utc::now());
@@ -683,11 +790,18 @@ pub async fn update_webauthn_credential_name(
         credential_id
     );
     let fetch_start = datetime_to_timestamp(Utc::now());
-    let credential_res =
-        query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
-            .bind(&credential_id)
-            .fetch_optional(&mut state.db.conn)
-            .await;
+    let credential_res = handles
+        .db
+        .run({
+            let credential_id_q = credential_id.clone();
+            move |mut db| async move {
+                query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+                    .bind(&credential_id_q)
+                    .fetch_optional(&mut db.conn)
+                    .await
+            }
+        })
+        .await;
     let fetch_end = datetime_to_timestamp(Utc::now());
 
     let credential = match credential_res {
@@ -746,10 +860,19 @@ pub async fn update_webauthn_credential_name(
         name
     );
     let update_start = datetime_to_timestamp(Utc::now());
-    let update_res = query("UPDATE webauthn_credentials SET name = ? WHERE id = ?")
-        .bind(name)
-        .bind(&credential_id)
-        .execute(&mut state.db.conn)
+    let update_res = handles
+        .db
+        .run({
+            let name_q = name.to_string();
+            let credential_id_q = credential_id.clone();
+            move |mut db| async move {
+                query("UPDATE webauthn_credentials SET name = ? WHERE id = ?")
+                    .bind(&name_q)
+                    .bind(&credential_id_q)
+                    .execute(&mut db.conn)
+                    .await
+            }
+        })
         .await;
     let update_end = datetime_to_timestamp(Utc::now());
 
@@ -786,7 +909,7 @@ pub async fn update_webauthn_credential_name(
 /// POST /api/webauthn/challenges
 /// Store a WebAuthn challenge
 pub async fn store_webauthn_challenge(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     JsonExtractor(payload): JsonExtractor<StoreChallengeRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
     let now = datetime_to_timestamp(Utc::now());
@@ -799,17 +922,30 @@ pub async fn store_webauthn_challenge(
     );
 
     let insert_start = datetime_to_timestamp(Utc::now());
-    let result = query(
-        "INSERT INTO webauthn_challenges (id, challenge, user_id, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-    )
-    .bind(&payload.id)
-    .bind(&payload.challenge)
-    .bind(payload.user_id.as_deref())
-    .bind(&payload.challenge_type)
-    .bind(payload.expires_at)
-    .bind(now)
-    .execute(&mut state.db.conn)
-    .await;
+    let result = handles
+        .db
+        .run({
+            let id_q = payload.id.clone();
+            let challenge_q = payload.challenge.clone();
+            let user_id_q = payload.user_id.clone();
+            let challenge_type_q = payload.challenge_type.clone();
+            let expires_q = payload.expires_at;
+            let now_q = now;
+            move |mut db| async move {
+                query(
+                    "INSERT INTO webauthn_challenges (id, challenge, user_id, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+                )
+                .bind(&id_q)
+                .bind(&challenge_q)
+                .bind(user_id_q.as_deref())
+                .bind(&challenge_type_q)
+                .bind(expires_q)
+                .bind(now_q)
+                .execute(&mut db.conn)
+                .await
+            }
+        })
+        .await;
 
     match result {
         Ok(_) => {
@@ -845,7 +981,7 @@ pub async fn store_webauthn_challenge(
 /// GET /api/webauthn/challenges/{challenge_id}
 /// Get a WebAuthn challenge
 pub async fn get_webauthn_challenge(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(challenge_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
@@ -853,12 +989,20 @@ pub async fn get_webauthn_challenge(
         challenge_id
     );
     let query_start = datetime_to_timestamp(Utc::now());
-    let challenge_res = query_as::<WebAuthnChallenge>(
-        "SELECT id, challenge, user_id, type as challenge_type, expires_at, created_at FROM webauthn_challenges WHERE id = ?"
-    )
-    .bind(&challenge_id)
-    .fetch_optional(&mut state.db.conn)
-    .await;
+    let challenge_res = handles
+        .db
+        .run({
+            let challenge_id_q = challenge_id.clone();
+            move |mut db| async move {
+                query_as::<WebAuthnChallenge>(
+                    "SELECT id, challenge, user_id, type as challenge_type, expires_at, created_at FROM webauthn_challenges WHERE id = ?"
+                )
+                .bind(&challenge_id_q)
+                .fetch_optional(&mut db.conn)
+                .await
+            }
+        })
+        .await;
     let query_end = datetime_to_timestamp(Utc::now());
 
     let challenge = match challenge_res {
@@ -923,7 +1067,7 @@ pub async fn get_webauthn_challenge(
 /// DELETE /api/webauthn/challenges/{challenge_id}
 /// Delete a WebAuthn challenge
 pub async fn delete_webauthn_challenge(
-    State(mut state): State<AppState>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     Path(challenge_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
     worker::console_log!(
@@ -931,9 +1075,17 @@ pub async fn delete_webauthn_challenge(
         challenge_id
     );
     let delete_start = datetime_to_timestamp(Utc::now());
-    let delete_res = query("DELETE FROM webauthn_challenges WHERE id = ?")
-        .bind(&challenge_id)
-        .execute(&mut state.db.conn)
+    let delete_res = handles
+        .db
+        .run({
+            let challenge_id_q = challenge_id.clone();
+            move |mut db| async move {
+                query("DELETE FROM webauthn_challenges WHERE id = ?")
+                    .bind(&challenge_id_q)
+                    .execute(&mut db.conn)
+                    .await
+            }
+        })
         .await;
     let delete_end = datetime_to_timestamp(Utc::now());
 

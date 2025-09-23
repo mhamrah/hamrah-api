@@ -1,4 +1,8 @@
 name = "hamrah-api-preview"
+# CI note: For per-PR previews, the deploy workflow overrides the Worker name:
+# - hamrah-api-pr-<PR_NUMBER> (for pull_request runs)
+# - hamrah-api-manual-<RUN_NUMBER> (for manual workflow_dispatch runs)
+# See .github/workflows/deploy.yml for the dynamic naming logic.
 main = "build/worker/shim.mjs"
 # Cloudflare Workers compatibility_date is pinned to the latest known, tested date.
 # Bump periodically to adopt new features/bug fixes after verifying in preview.
@@ -20,15 +24,17 @@ database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 [ai]
 binding = "AI"
 
-[[r2_buckets]]
-binding = "ARCHIVES"
-bucket_name = "hamrah-archives"
+
 
 
 
 [[services]]
 binding = "PIPELINE_SERVICE"
 service = "hamrah-link-pipeline-preview"
+# CI note: For per-PR previews, this binding is rewritten at deploy-time to the matching
+# per-PR pipeline worker:
+# - hamrah-link-pipeline-pr-<PR_NUMBER> (for pull_request runs)
+# - hamrah-link-pipeline-manual-<RUN_NUMBER> (for manual workflow_dispatch runs)
 
 [vars]
 APPLE_TEAM_ID = "UR6RM9YCF7"

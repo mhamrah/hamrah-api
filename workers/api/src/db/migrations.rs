@@ -253,9 +253,7 @@ impl Migration for PipelineMigration {
             word_count INTEGER,
             reading_time_sec INTEGER,
             content_hash TEXT,
-            archive_etag TEXT,
-            archive_bytes INTEGER,
-            archive_r2_key TEXT,
+
             save_count INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -388,11 +386,37 @@ impl Migration for SoftDeleteMigration {
     }
 }
 
+pub struct AppAttestationKeyMaterialMigration;
+
+impl Migration for AppAttestationKeyMaterialMigration {
+    fn version(&self) -> &'static str {
+        "005"
+    }
+
+    fn name(&self) -> &'static str {
+        "app_attestation_key_material"
+    }
+
+    fn up(&self) -> &'static str {
+        r#"
+        ALTER TABLE app_attest_keys ADD COLUMN public_key TEXT;
+        ALTER TABLE app_attest_keys ADD COLUMN attestation_receipt TEXT;
+        "#
+    }
+
+    fn down(&self) -> &'static str {
+        r#"
+        -- No-op: SQLite/D1 does not support DROP COLUMN; leaving columns in place.
+        "#
+    }
+}
+
 pub fn get_migrations() -> Vec<&'static dyn Migration> {
     vec![
         &InitialMigration,
         &AppAttestationMigration,
         &PipelineMigration,
         &SoftDeleteMigration,
+        &AppAttestationKeyMaterialMigration,
     ]
 }

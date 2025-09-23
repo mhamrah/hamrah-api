@@ -85,18 +85,6 @@ pub struct IdemRow {
     pub status: Option<i64>,
 }
 
-#[derive(sqlx::FromRow)]
-pub struct ArchiveInfo {
-    pub id: String,
-    pub canonical_url: String,
-}
-
-#[derive(sqlx::FromRow)]
-pub struct ArchiveRow {
-    pub archive_path: Option<String>,
-    pub archive_size_bytes: Option<i64>,
-}
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct LinkTagView {
     pub tag_name: String,

@@ -145,10 +145,8 @@ pub struct Link {
     pub lang: Option<String>,
     pub word_count: Option<i64>,
     pub reading_time_sec: Option<i64>,
+    // Archive fields removed; archiving is handled by the link pipeline
     pub content_hash: Option<String>,
-    pub archive_etag: Option<String>,
-    pub archive_bytes: Option<i64>,
-    pub archive_r2_key: Option<String>,
     pub save_count: i64,
     pub created_at: String,
     pub updated_at: String,

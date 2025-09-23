@@ -95,35 +95,7 @@ describe('Helper Functions', () => {
     })
   })
 
-  describe('r2KeyForLink', () => {
-    function r2KeyForLink(userId: string, linkId: string): string {
-      return `archives/${userId}/${linkId}.html`;
-    }
 
-    it('should generate correct R2 key format', () => {
-      const userId = 'user123'
-      const linkId = 'link456'
-      const expected = 'archives/user123/link456.html'
-
-      expect(r2KeyForLink(userId, linkId)).toBe(expected)
-    })
-
-    it('should handle special characters in IDs', () => {
-      const userId = 'user-with-dashes'
-      const linkId = 'link_with_underscores'
-      const expected = 'archives/user-with-dashes/link_with_underscores.html'
-
-      expect(r2KeyForLink(userId, linkId)).toBe(expected)
-    })
-
-    it('should handle UUIDs', () => {
-      const userId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-      const linkId = '01234567-89ab-cdef-0123-456789abcdef'
-      const expected = 'archives/a1b2c3d4-e5f6-7890-abcd-ef1234567890/01234567-89ab-cdef-0123-456789abcdef.html'
-
-      expect(r2KeyForLink(userId, linkId)).toBe(expected)
-    })
-  })
 
   describe('stripHtmlToText', () => {
     function stripHtmlToText(html: string): string {

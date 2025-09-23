@@ -1,7 +1,6 @@
 pub mod auth;
 pub mod internal;
 pub mod links;
-pub mod links_archive;
 pub mod links_detail;
 pub mod links_list;
 pub mod models;
@@ -16,10 +15,7 @@ pub mod common;
 // Functions defined in this file are available directly
 
 use crate::error::AppResult;
-use axum::{
-    response::IntoResponse,
-    Json,
-};
+use axum::{response::IntoResponse, Json};
 use serde_json::json;
 
 // POST /v1/links handler moved to links.rs
@@ -34,38 +30,45 @@ use serde_json::json;
 
 // DELETE /v1/links/{id} handler moved to links_detail.rs
 
-// HEAD /v1/links/{id}/archive handler moved to links_archive.rs
-
-// GET /v1/links/{id}/archive handler moved to links_archive.rs
-
 // POST /v1/links/{id}/refresh handler can stay in main mod.rs for now
 
 // Note: This handler uses both Database and Env state, keeping here temporarily
-use crate::db::Database;
-use crate::handlers::users::get_current_user_from_request;
 use crate::error::AppError;
-use axum::{
-    extract::{Path, State},
-    http::HeaderMap,
-};
+use crate::handlers::users::get_current_user_from_request;
+use crate::shared_handles::SharedHandles;
+use axum::{extract::Path, http::HeaderMap};
 use chrono::Utc;
 use sqlx_d1::query;
-use worker::Env;
 
 pub async fn post_link_refresh(
-    State(mut db): State<Database>,
-    State(env): State<Env>,
+    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let user = get_current_user_from_request(&mut db, &headers).await?;
+    // Authenticate current user via executor
+    let headers_clone = headers.clone();
+    let user =
+        handles
+            .db
+            .run(move |mut db| async move {
+                get_current_user_from_request(&mut db, &headers_clone).await
+            })
+            .await?;
+
     let now_iso = Utc::now().to_rfc3339();
 
     // Ensure link belongs to user
-    let exists = query("SELECT 1 FROM links WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-        .bind(&id)
-        .bind(&user.id)
-        .fetch_optional(&mut db.conn)
+    let id_q = id.clone();
+    let user_id_q = user.id.clone();
+    let exists = handles
+        .db
+        .run(move |mut db| async move {
+            query("SELECT 1 FROM links WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+                .bind(&id_q)
+                .bind(&user_id_q)
+                .fetch_optional(&mut db.conn)
+                .await
+        })
         .await
         .map_err(|e| e.to_string())?
         .is_some();
@@ -75,16 +78,34 @@ pub async fn post_link_refresh(
     }
 
     // Update link state to pending
-    query("UPDATE links SET state = 'pending', updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-        .bind(&now_iso)
-        .bind(&id)
-        .bind(&user.id)
-        .execute(&mut db.conn)
+    let id_q2 = id.clone();
+    let user_id_q2 = user.id.clone();
+    let now_iso_q = now_iso.clone();
+    handles
+        .db
+        .run(move |mut db| async move {
+            query("UPDATE links SET state = 'pending', updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+                .bind(&now_iso_q)
+                .bind(&id_q2)
+                .bind(&user_id_q2)
+                .execute(&mut db.conn)
+                .await
+        })
         .await
         .map_err(|e| e.to_string())?;
 
     // Trigger pipeline worker now (fire-and-forget)
-    crate::pipeline_shim::try_trigger_pipeline_for_link(&env, &id, &user.id).await;
+    {
+        let id2 = id.clone();
+        let user_id2 = user.id.clone();
+        let _ = handles
+            .env
+            .run(move |env| async move {
+                crate::pipeline_shim::try_trigger_pipeline_for_link(&env, &id2, &user_id2).await;
+                Ok::<(), ()>(())
+            })
+            .await;
+    }
 
     Ok(Json(json!({ "success": true })))
 }

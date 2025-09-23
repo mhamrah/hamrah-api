@@ -20,9 +20,7 @@ database_id = "aa57b2da-516e-4f48-8595-52ecc887787a"
 [ai]
 binding = "AI"
 
-[[r2_buckets]]
-binding = "ARCHIVES"
-bucket_name = "hamrah-archives"
+
 
 
 
@@ -35,6 +33,8 @@ APPLE_TEAM_ID = "UR6RM9YCF7"
 APPLE_BUNDLE_ID = "app.hamrah.ios"
 ENVIRONMENT = "production"
 APPLE_KEY_ID = "PGW4JA9UQF"
+APP_ATTEST_VERIFY_SIGNATURE_STRICT="true"
+APP_ATTEST_DEV_BYPASS="true"
 
 [[rules]]
 globs = ["**/*.wasm"]
