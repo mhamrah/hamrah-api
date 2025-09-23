@@ -34,9 +34,9 @@ enabled = true
 
 # Preview environment configuration
 [env.preview]
-name = "hamrah-link-pipeline-preview"
-# CI note: For per-PR previews, CI publishes with --env preview and a PR-specific --name,
-# overriding this default environment name. See the deploy workflow for details.
+# No name specified here - CI will provide dynamic names via --name flag
+# CI note: For per-PR previews, CI publishes with --env preview and a PR-specific --name.
+# See the deploy workflow for details.
 
 [env.preview.ai]
 binding = "AI"
