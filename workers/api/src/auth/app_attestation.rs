@@ -103,26 +103,33 @@ fn parse_attestation_token(token: &str) -> Result<AttestationPayload, String> {
 
 /// Creates a JWT token for authenticating with Apple's App Attest API using jwt-simple
 async fn create_apple_jwt(env: &Env) -> Result<String, String> {
+    console_log!("[Debug] create_apple_jwt: starting");
     // Get required environment variables
     let bundle_id = env
         .var("APPLE_BUNDLE_ID")
         .map_err(|_| "APPLE_BUNDLE_ID not configured".to_string())?
         .to_string();
+    console_log!("[Debug] create_apple_jwt: APPLE_BUNDLE_ID={}", bundle_id);
 
     let team_id = env
         .var("APPLE_TEAM_ID")
         .map_err(|_| "APPLE_TEAM_ID not configured".to_string())?
         .to_string();
+    console_log!("[Debug] create_apple_jwt: APPLE_TEAM_ID={}", team_id);
 
-    let _key_id = env
+    let key_id = env
         .var("APPLE_KEY_ID")
         .map_err(|_| "APPLE_KEY_ID not configured".to_string())?
         .to_string();
+    console_log!("[Debug] create_apple_jwt: APPLE_KEY_ID={}", key_id);
 
-    let private_key = env
-        .var("APPLE_PRIVATE_KEY")
-        .map_err(|_| "APPLE_PRIVATE_KEY not configured".to_string())?
-        .to_string();
+    let private_key_result = env.var("APPLE_PRIVATE_KEY");
+    if private_key_result.is_err() {
+        console_log!("[Debug] create_apple_jwt: APPLE_PRIVATE_KEY not found");
+        return Err("APPLE_PRIVATE_KEY not configured".to_string());
+    }
+    console_log!("[Debug] create_apple_jwt: APPLE_PRIVATE_KEY found");
+    let private_key = private_key_result.unwrap().to_string();
 
     // Parse the private key using jwt-simple
     let key_pair = ES256KeyPair::from_pem(&private_key).map_err(|e| {
@@ -223,6 +230,11 @@ pub async fn enforce_request_attestation_from_headers(
     dev_bypass: bool,
     strict_verify: bool,
 ) -> Result<(), String> {
+    console_log!(
+        "[Debug] enforce_request_attestation_from_headers: starting with dev_bypass={}, strict_verify={}",
+        dev_bypass,
+        strict_verify
+    );
     // Dev/simulator bypass (opt-in via env)
 
     // Simulator detection via UA or explicit header from app
@@ -234,7 +246,7 @@ pub async fn enforce_request_attestation_from_headers(
         .is_some();
 
     if dev_bypass && (is_sim || has_dev_header) {
-        console_log!("App Attestation: dev/simulator bypass accepted");
+        console_log!("[Debug] enforce_request_attestation_from_headers: dev/simulator bypass accepted");
         return Ok(());
     }
 
@@ -243,6 +255,7 @@ pub async fn enforce_request_attestation_from_headers(
         .get("X-iOS-App-Attest-Key")
         .and_then(|h| h.to_str().ok())
         .ok_or_else(|| "Missing X-iOS-App-Attest-Key header".to_string())?;
+    console_log!("[Debug] enforce_request_attestation_from_headers: key_id={}", key_id);
 
     let assertion_b64 = headers
         .get("X-iOS-App-Attest-Assertion")
@@ -261,7 +274,9 @@ pub async fn enforce_request_attestation_from_headers(
         .or_else(|| headers.get("X-iOS-Bundle-ID"))
         .and_then(|h| h.to_str().ok())
         .ok_or_else(|| "Missing X-iOS-App-Bundle-ID header".to_string())?;
+    console_log!("[Debug] enforce_request_attestation_from_headers: bundle_id={}", bundle_id);
 
+    console_log!("[Debug] enforce_request_attestation_from_headers: checking database for key_id");
     let row = query("SELECT 1 FROM app_attest_keys WHERE key_id = ? AND bundle_id = ? LIMIT 1")
         .bind(key_id)
         .bind(bundle_id)
@@ -270,10 +285,13 @@ pub async fn enforce_request_attestation_from_headers(
         .map_err(|e| format!("Database error checking App Attest key: {}", e))?;
 
     if row.is_none() {
+        console_log!("[Debug] enforce_request_attestation_from_headers: key_id not found in database");
         return Err("Unknown App Attest key id or bundle ID mismatch".to_string());
     }
+    console_log!("[Debug] enforce_request_attestation_from_headers: key_id found in database");
 
     // Verify challenge freshness
+    console_log!("[Debug] enforce_request_attestation_from_headers: verifying challenge freshness");
     // The iOS client creates a deterministic challenge that ends with a timestamp: ...:<seconds_since_epoch>
     use base64::Engine;
     let challenge_bytes = base64::engine::general_purpose::STANDARD
@@ -293,13 +311,22 @@ pub async fn enforce_request_attestation_from_headers(
 
     let now_secs = (Utc::now().timestamp_millis() as f64) / 1000.0;
     let max_skew_secs = 120.0; // 2 minutes window
+    console_log!(
+        "[Debug] enforce_request_attestation_from_headers: now_secs={}, ts_secs={}, skew_secs={}",
+        now_secs,
+        ts_secs,
+        now_secs - ts_secs
+    );
     if now_secs - ts_secs > max_skew_secs {
+        console_log!("[Debug] enforce_request_attestation_from_headers: stale challenge");
         return Err("Stale request challenge".to_string());
     }
     if ts_secs - now_secs > 30.0 {
+        console_log!("[Debug] enforce_request_attestation_from_headers: challenge from the future");
         // guard against far-future timestamps
         return Err("Request challenge timestamp is in the future".to_string());
     }
+    console_log!("[Debug] enforce_request_attestation_from_headers: challenge is fresh");
 
     // Decode assertion (COSE_Sign1) for verification
     let assertion_bytes = base64::engine::general_purpose::STANDARD
@@ -311,6 +338,7 @@ pub async fn enforce_request_attestation_from_headers(
 
     // Signature verification using stored XY (base64 of X||Y) when available.
     // When APP_ATTEST_VERIFY_SIGNATURE_STRICT=true/1/yes, enforce verification; otherwise best-effort/log-only.
+    console_log!("[Debug] enforce_request_attestation_from_headers: starting signature verification");
 
     if let Ok(Some((public_key_opt,))) = sqlx_d1::query_as::<(Option<String>,)>(
         "SELECT public_key FROM app_attest_keys WHERE key_id = ? LIMIT 1",
@@ -320,6 +348,7 @@ pub async fn enforce_request_attestation_from_headers(
     .await
     {
         if let Some(pub_xy_b64) = public_key_opt {
+            console_log!("[Debug] enforce_request_attestation_from_headers: public key found in db");
             // Decode stored base64(X||Y) and construct uncompressed SEC1 pubkey
             let pub_xy = base64::engine::general_purpose::STANDARD
                 .decode(pub_xy_b64.as_bytes())
@@ -374,10 +403,13 @@ pub async fn enforce_request_attestation_from_headers(
             };
 
             if strict_verify {
+                console_log!("[Debug] enforce_request_attestation_from_headers: strict verification enabled");
                 if vk.verify(&tbs, &sig).is_err() {
+                    console_log!("[Debug] enforce_request_attestation_from_headers: signature verification failed (strict)");
                     return Err("Invalid App Attest assertion signature".to_string());
                 }
                 if !payload_matches {
+                    console_log!("[Debug] enforce_request_attestation_from_headers: payload mismatch (strict)");
                     return Err("App Attest payload does not match challenge hash".to_string());
                 }
             } else if vk.verify(&tbs, &sig).is_ok() {
@@ -387,10 +419,13 @@ pub async fn enforce_request_attestation_from_headers(
             } else {
                 console_log!("App Attestation: signature verification failed (non-strict). Set APP_ATTEST_VERIFY_SIGNATURE_STRICT=true to enforce.");
             }
+            console_log!("[Debug] enforce_request_attestation_from_headers: signature verification passed");
         } else {
+            console_log!("[Debug] enforce_request_attestation_from_headers: no public key stored, skipping signature verification");
             console_log!("App Attestation: no public_key stored; skipping signature verification (TODO: extract and store from attestation).");
         }
     } else {
+        console_log!("[Debug] enforce_request_attestation_from_headers: could not fetch public key, skipping signature verification");
         console_log!("App Attestation: could not fetch public_key for key_id; skipping signature verification.");
     }
 
