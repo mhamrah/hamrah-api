@@ -160,7 +160,7 @@ async fn verify_with_apple(
     jwt_token: &str,
 ) -> Result<Option<String>, String> {
     // Construct Apple's App Attest verification URL
-    let verify_url = "https://api.devicecheck.apple.com/v1/attestation";
+    let verify_url = "https://api.devicecheck.apple.com/v1/validate_attestation";
 
     // Prepare the payload for Apple
     let payload = serde_json::json!({
