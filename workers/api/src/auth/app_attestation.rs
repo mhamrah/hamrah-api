@@ -139,7 +139,7 @@ pub async fn enforce_request_attestation_from_headers(
     let team_id = env
         .var("APPLE_TEAM_ID")
         .map_err(|_| "APPLE_TEAM_ID not configured".to_string())?;
-    let app_id = format!("{}.{}", team_id.to_string(), bundle_id);
+    let app_id = format!("{}.{}", team_id, bundle_id);
 
     let _assertion_bytes = BASE64_STANDARD
         .decode(assertion_b64)

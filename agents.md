@@ -84,62 +84,6 @@ Privacy & Security
 - External API: https://api.hamrah.app (mobile and external clients)
 - Internal API: Service binding from hamrah.app (web)
 
----
-
-## API Endpoints
-
-Internal (service-to-service)
-- POST /api/internal/users — Create users
-- POST /api/internal/sessions — Create web sessions
-- POST /api/internal/tokens — Create API tokens for mobile
-- POST /api/internal/sessions/validate — Validate session tokens
-
-Public Authentication
-- GET /api/auth/sessions/validate — Validate session
-- GET /api/auth/tokens/validate — Validate access token (Bearer) and return validity/expiry metadata
-- POST /api/auth/sessions/logout — Logout session
-- POST /api/auth/tokens/refresh — Refresh access token
-- DELETE /api/auth/tokens/:token_id/revoke — Revoke specific token
-- DELETE /api/auth/users/:user_id/tokens/revoke — Revoke all user tokens
-
-WebAuthn Passkeys
-- POST /api/webauthn/register/begin — Start registration
-- POST /api/webauthn/register/complete — Complete registration
-- POST /api/webauthn/authenticate/begin — Start authentication
-- POST /api/webauthn/authenticate/complete — Complete authentication
-- GET /api/webauthn/credentials — List passkeys
-- DELETE /api/webauthn/credentials/:id — Delete passkey
-- PATCH /api/webauthn/credentials/:id — Rename passkey
-
-User Management
-- GET /api/users/me — Current user info
-- PUT /api/users/me — Update user info
-- DELETE /api/users/me — Delete account
-- GET /api/users/me/tokens — List active tokens
-- GET /api/users/:user_id — Get user by ID
-
-### Authentication Endpoint Details
-
-- GET /api/auth/tokens/validate
-  - Purpose: Lightweight validation of Bearer access token without fetching user profile
-  - Auth: Authorization: Bearer <access_token>
-  - Success (200): { success: true, valid: true, userId, platform, accessExpiresAt, expiresIn }
-  - Failure (401): Unauthorized when token is missing, invalid, expired, or revoked
-  - Notes: Does not rotate tokens and does not return user profile; prefer GET /api/users/me when user data is needed
-
----
-
-## Database Schema (Conceptual)
-
-- Users: Account profile and identity provider fields
-- Sessions: Web sessions with expiration
-- Auth Tokens: Access/refresh tokens for mobile/web
-- WebAuthn:
-  - webauthn_credentials: Registered passkeys
-  - webauthn_challenges: Ephemeral challenges
-
----
-
 ## Security
 
 - Internal Service Authentication: X-Internal-Service, X-Internal-Key headers
@@ -151,18 +95,7 @@ User Management
 
 ---
 
-## Roadmap
-
-- Comprehensive offline note/link search with embeddings
-- Intelligent lists and reminders
-- Proactive recall: surface relevant content upon user query
-- Enhanced sync diffing for large offline datasets
-- Cross-device continuity and secure backup/restore
-
----
-
 ## Development Notes
 
-- Always run formatters before committing and after edits.
-- Rust: cargo fmt / clippy / test
-- TS: type-check / build / test
+- Always run `cargo fmt` after saving a file or making a change.
+- Always run `cargo clippy -- -D warnings` to catch lints before committing code.
