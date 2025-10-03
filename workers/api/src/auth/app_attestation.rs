@@ -1,14 +1,21 @@
 use crate::db::Database;
 use crate::shared_handles::SharedHandles;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::utils::datetime_to_timestamp;
+#[cfg(not(target_arch = "wasm32"))]
 use appattest_rs::{assertion::Assertion, attestation::Attestation};
 use axum::extract::Request as AxumRequest;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::{middleware::Next, response::Response};
+#[cfg(not(target_arch = "wasm32"))]
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+#[cfg(not(target_arch = "wasm32"))]
 use base64::Engine;
+#[cfg(not(target_arch = "wasm32"))]
 use chrono::Utc;
-use worker::{console_log, Env};
+#[cfg(not(target_arch = "wasm32"))]
+use worker::console_log;
+use worker::Env;
 
 // Apple App Attestation Root CA certificate is handled internally by appattest-rs
 
@@ -24,6 +31,7 @@ pub fn is_ios_simulator(user_agent: Option<&str>) -> bool {
 }
 
 /// Validates an Apple App Attestation object using the appattest-rs crate.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn perform_attestation_validation(
     attestation_b64: &str,
     challenge_b64: &str,
@@ -63,7 +71,19 @@ pub fn perform_attestation_validation(
     }
 }
 
+/// WASM-compatible stub for attestation validation (returns error since not supported)
+#[cfg(target_arch = "wasm32")]
+pub fn perform_attestation_validation(
+    _attestation_b64: &str,
+    _challenge_b64: &str,
+    _team_id: &str,
+    _bundle_id: &str,
+) -> Result<Vec<u8>, String> {
+    Err("Apple App Attestation is not supported in WASM environment".to_string())
+}
+
 /// Enforce iOS App Attestation headers for "sensitive" routes.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn enforce_request_attestation_from_headers(
     headers: &HeaderMap,
     db: &mut Database,
@@ -191,6 +211,16 @@ pub async fn enforce_request_attestation_from_headers(
     }
 
     Ok(())
+}
+
+/// WASM-compatible stub for request attestation enforcement (returns error since not supported)
+#[cfg(target_arch = "wasm32")]
+pub async fn enforce_request_attestation_from_headers(
+    _headers: &HeaderMap,
+    _db: &mut Database,
+    _env: &Env,
+) -> Result<(), String> {
+    Err("Apple App Attestation is not supported in WASM environment".to_string())
 }
 
 /// Axum middleware to enforce iOS App Attestation on protected routes.

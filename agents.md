@@ -13,6 +13,8 @@ Summary
 
 ## System Architecture
 
+- Rust-based backend API with TypeScript link processing worker for AI tasks
+- API runs on Cloudflare Workers (WASM for Rust) and must compile to WASM
 - Framework: Axum (Rust async web framework)
 - Database: SQLite with SQLx for async operations
 - Runtime/Deployment: Cloudflare Workers (WASM for Rust)

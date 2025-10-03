@@ -56,10 +56,12 @@ url = "2.5.7"
 serde_urlencoded = "0.7.1"
 ciborium = "0.2"
 wasm-bindgen-futures = "0.4"
-appattest-rs = "0.1.0"
 pem = "3.0.4"
 # WebAuthn-rs removed - WebAuthn protocol handled in web layer only
 
 [dev-dependencies]
 tokio = { version = "1.0", default-features = false, features = ["macros", "rt"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "derive", "macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+appattest-rs = "0.1.0"
