@@ -19,9 +19,9 @@ use p256::{
 };
 use sha2::{Digest, Sha256};
 
-// Apple App Attestation AAGUID (fixed value for all attestations)
+// Apple App Attestation AAGUID (production: "appattest" + 7 zero bytes)
 const APPLE_APP_ATTEST_AAGUID: &[u8] = &[
-    0xA6, 0x94, 0x1B, 0xAD, 0x4C, 0xFE, 0x7F, 0x7D, 0x57, 0x8E, 0x19, 0x64, 0xF4, 0x39, 0x1C, 0x37,
+    0x61, 0x70, 0x70, 0x61, 0x74, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
 #[derive(Debug)]
@@ -291,8 +291,31 @@ pub fn perform_attestation_validation(
         .as_ref()
         .ok_or("Missing attested credential data")?;
 
+    console_log!("[Debug] Received AAGUID: {:?}", credential_data.aaguid);
+    console_log!("[Debug] Expected AAGUID: {:?}", APPLE_APP_ATTEST_AAGUID);
+
     if credential_data.aaguid != APPLE_APP_ATTEST_AAGUID {
-        return Err("Invalid AAGUID".to_string());
+        // Log the actual AAGUID for debugging
+        let received_hex = credential_data
+            .aaguid
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join("");
+        let expected_hex = APPLE_APP_ATTEST_AAGUID
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join("");
+        console_log!(
+            "[Debug] AAGUID mismatch - Received: {}, Expected: {}",
+            received_hex,
+            expected_hex
+        );
+        return Err(format!(
+            "Invalid AAGUID - received: {}, expected: {}",
+            received_hex, expected_hex
+        ));
     }
 
     // Extract public key from COSE key
