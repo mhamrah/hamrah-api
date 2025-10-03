@@ -411,6 +411,30 @@ impl Migration for AppAttestationKeyMaterialMigration {
     }
 }
 
+pub struct AppAttestationCounterMigration;
+
+impl Migration for AppAttestationCounterMigration {
+    fn version(&self) -> &'static str {
+        "006"
+    }
+
+    fn name(&self) -> &'static str {
+        "app_attestation_counter"
+    }
+
+    fn up(&self) -> &'static str {
+        r#"
+        ALTER TABLE app_attest_keys ADD COLUMN counter INTEGER NOT NULL DEFAULT 0;
+        "#
+    }
+
+    fn down(&self) -> &'static str {
+        r#"
+        -- No-op: SQLite/D1 does not support DROP COLUMN; leaving column in place.
+        "#
+    }
+}
+
 pub fn get_migrations() -> Vec<&'static dyn Migration> {
     vec![
         &InitialMigration,
@@ -418,5 +442,6 @@ pub fn get_migrations() -> Vec<&'static dyn Migration> {
         &PipelineMigration,
         &SoftDeleteMigration,
         &AppAttestationKeyMaterialMigration,
+        &AppAttestationCounterMigration,
     ]
 }
