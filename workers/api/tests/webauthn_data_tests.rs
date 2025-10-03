@@ -1,7 +1,33 @@
 use base64::Engine;
-use hamrah_api::handlers::webauthn_data::{
-    StoreChallengeRequest, StoreCredentialRequest, UpdateCredentialCounterRequest,
-};
+#[derive(serde::Serialize)]
+pub struct StoreCredentialRequest {
+    pub id: String,
+    pub user_id: String,
+    pub public_key: Vec<u8>,
+    pub counter: i64,
+    pub transports: Option<Vec<String>>,
+    pub aaguid: Option<Vec<u8>>,
+    pub credential_type: String,
+    pub user_verified: bool,
+    pub credential_device_type: Option<String>,
+    pub credential_backed_up: bool,
+    pub name: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct StoreChallengeRequest {
+    pub id: String,
+    pub challenge: String,
+    pub user_id: Option<String>,
+    pub challenge_type: String,
+    pub expires_at: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct UpdateCredentialCounterRequest {
+    pub counter: i64,
+    pub last_used: i64,
+}
 use serde_json::json;
 use uuid::Uuid;
 

@@ -6,7 +6,6 @@ type SqlError = sqlx_d1::Error;
 
 pub trait Migration {
     fn up(&self) -> &'static str;
-    #[allow(dead_code)] // May be used for migration rollbacks in the future
     fn down(&self) -> &'static str;
     fn version(&self) -> &'static str;
     fn name(&self) -> &'static str;
@@ -40,7 +39,7 @@ impl<'a> MigrationRunner<'a> {
                 version TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 applied_at INTEGER NOT NULL
-            )
+            );
         "#,
         )
         .execute(&mut self.db.conn)
@@ -73,7 +72,11 @@ impl<'a> MigrationRunner<'a> {
     }
 }
 
-// Initial migration to create all tables
+/// Single initial migration that creates the entire schema with:
+/// - INTEGER timestamps everywhere (ms since epoch)
+/// - Soft delete via deleted_at INTEGER (nullable) where applicable
+/// - Necessary unique constraints
+/// - Sensible composite indexes for query patterns
 pub struct InitialMigration;
 
 impl Migration for InitialMigration {
@@ -87,6 +90,8 @@ impl Migration for InitialMigration {
 
     fn up(&self) -> &'static str {
         r#"
+        -- USERS & AUTH
+
         CREATE TABLE users (
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL UNIQUE,
@@ -109,32 +114,7 @@ impl Migration for InitialMigration {
             created_at INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-
-        CREATE TABLE webauthn_credentials (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            public_key TEXT NOT NULL,
-            counter INTEGER NOT NULL DEFAULT 0,
-            transports TEXT,
-            aaguid TEXT,
-            credential_type TEXT NOT NULL DEFAULT 'public-key',
-            user_verified INTEGER NOT NULL DEFAULT 0,
-            credential_device_type TEXT,
-            credential_backed_up INTEGER NOT NULL DEFAULT 0,
-            name TEXT,
-            last_used INTEGER,
-            created_at INTEGER NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE webauthn_challenges (
-            id TEXT PRIMARY KEY,
-            challenge TEXT NOT NULL,
-            user_id TEXT,
-            type TEXT NOT NULL,
-            expires_at INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-        );
+        CREATE INDEX sessions_user_expires_idx ON sessions(user_id, expires_at);
 
         CREATE TABLE auth_tokens (
             id TEXT PRIMARY KEY,
@@ -151,43 +131,15 @@ impl Migration for InitialMigration {
             created_at INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-
         CREATE INDEX auth_tokens_user_revoked_expires_idx ON auth_tokens(user_id, revoked, access_expires_at);
         CREATE INDEX auth_tokens_expiration_idx ON auth_tokens(access_expires_at);
         CREATE INDEX auth_tokens_refresh_expiration_idx ON auth_tokens(refresh_expires_at);
         CREATE INDEX auth_tokens_user_platform_idx ON auth_tokens(user_id, platform);
-        "#
-    }
+        CREATE INDEX auth_tokens_token_hash_idx ON auth_tokens(token_hash);
+        CREATE INDEX auth_tokens_refresh_token_hash_idx ON auth_tokens(refresh_token_hash);
 
-    fn down(&self) -> &'static str {
-        r#"
-        DROP INDEX IF EXISTS auth_tokens_user_platform_idx;
-        DROP INDEX IF EXISTS auth_tokens_refresh_expiration_idx;
-        DROP INDEX IF EXISTS auth_tokens_expiration_idx;
-        DROP INDEX IF EXISTS auth_tokens_user_revoked_expires_idx;
-        DROP TABLE IF EXISTS auth_tokens;
-        DROP TABLE IF EXISTS webauthn_challenges;
-        DROP TABLE IF EXISTS webauthn_credentials;
-        DROP TABLE IF EXISTS sessions;
-        DROP TABLE IF EXISTS users;
-        "#
-    }
-}
+        -- APP ATTESTATION
 
-// App Attestation tables migration
-pub struct AppAttestationMigration;
-
-impl Migration for AppAttestationMigration {
-    fn version(&self) -> &'static str {
-        "002"
-    }
-
-    fn name(&self) -> &'static str {
-        "app_attestation_tables"
-    }
-
-    fn up(&self) -> &'static str {
-        r#"
         CREATE TABLE app_attest_challenges (
             id TEXT PRIMARY KEY,
             challenge TEXT NOT NULL,
@@ -196,50 +148,31 @@ impl Migration for AppAttestationMigration {
             expires_at INTEGER NOT NULL,
             created_at INTEGER NOT NULL
         );
+        CREATE INDEX app_attest_challenges_expires_idx ON app_attest_challenges(expires_at);
 
         CREATE TABLE app_attest_keys (
             key_id TEXT PRIMARY KEY,
             bundle_id TEXT NOT NULL,
+            -- Store binary key material as BLOB
+            public_key BLOB,
+            -- Optional receipt/payload
+            attestation_receipt TEXT,
+            counter INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             last_used_at INTEGER NOT NULL
         );
-
-        CREATE INDEX app_attest_challenges_expires_idx ON app_attest_challenges(expires_at);
         CREATE INDEX app_attest_keys_bundle_idx ON app_attest_keys(bundle_id);
-        "#
-    }
 
-    fn down(&self) -> &'static str {
-        r#"
-        DROP INDEX IF EXISTS app_attest_keys_bundle_idx;
-        DROP INDEX IF EXISTS app_attest_challenges_expires_idx;
-        DROP TABLE IF EXISTS app_attest_keys;
-        DROP TABLE IF EXISTS app_attest_challenges;
-        "#
-    }
-}
+        -- LINKS PIPELINE (DELTA SYNC, TAGS, SUMMARIES, JOBS, PUSH, PREFS, IDEMPOTENCY)
 
-pub struct PipelineMigration;
-
-impl Migration for PipelineMigration {
-    fn version(&self) -> &'static str {
-        "003"
-    }
-
-    fn name(&self) -> &'static str {
-        "pipeline_tables"
-    }
-
-    fn up(&self) -> &'static str {
-        r#"
         CREATE TABLE links (
-            id TEXT PRIMARY KEY,
+            id TEXT PRIMARY KEY, -- ULID/UUID
             user_id TEXT NOT NULL,
-            client_id TEXT,
+            client_id TEXT, -- optional client-provided id
             original_url TEXT NOT NULL,
             canonical_url TEXT NOT NULL,
             host TEXT,
-            state TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('active','archived')) DEFAULT 'active', -- soft-delete managed via deleted_at
             failure_reason TEXT,
             title TEXT,
             description TEXT,
@@ -253,13 +186,19 @@ impl Migration for PipelineMigration {
             word_count INTEGER,
             reading_time_sec INTEGER,
             content_hash TEXT,
-
-            save_count INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            ready_at TEXT,
+            save_count INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            ready_at INTEGER,
+            deleted_at INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+
+        -- Uniqueness per user on canonical URL to avoid duplicates; enables upsert
+        CREATE UNIQUE INDEX links_user_canonical_unique ON links(user_id, canonical_url);
+        -- Common query access patterns
+        CREATE INDEX links_user_deleted_updated_idx ON links(user_id, deleted_at, updated_at);
+        CREATE INDEX links_canonical_idx ON links(canonical_url);
 
         CREATE TABLE link_saves (
             id TEXT PRIMARY KEY,
@@ -267,11 +206,13 @@ impl Migration for PipelineMigration {
             user_id TEXT NOT NULL,
             source_app TEXT,
             shared_text TEXT,
-            shared_at TEXT,
-            created_at TEXT NOT NULL,
+            shared_at INTEGER,
+            created_at INTEGER NOT NULL,
             FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        -- Speed up "latest shared_at" subqueries
+        CREATE INDEX link_saves_link_shared_idx ON link_saves(link_id, shared_at DESC);
 
         CREATE TABLE tags (
             id TEXT PRIMARY KEY,
@@ -286,41 +227,63 @@ impl Migration for PipelineMigration {
             FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
         );
+        CREATE INDEX link_tags_tag_idx ON link_tags(tag_id);
 
         CREATE TABLE link_summaries (
             id TEXT PRIMARY KEY,
             link_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
-            model_id TEXT NOT NULL,
+            model_id TEXT NOT NULL, -- e.g., "@cf/meta/llama-3.1-8b-instruct"
             prompt_version TEXT,
             prompt_text TEXT NOT NULL,
             short_summary TEXT NOT NULL,
             long_summary TEXT,
             tags_json TEXT,
             usage_json TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
             FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        CREATE UNIQUE INDEX link_summaries_link_model_unique ON link_summaries(link_id, model_id);
+        CREATE INDEX link_summaries_link_idx ON link_summaries(link_id);
+
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY,
+            link_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            kind TEXT NOT NULL, -- e.g., "process_link"
+            run_at INTEGER NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX jobs_link_idx ON jobs(link_id);
+        CREATE INDEX jobs_user_run_at_idx ON jobs(user_id, run_at);
 
         CREATE TABLE push_tokens (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             device_token TEXT NOT NULL,
-            platform TEXT NOT NULL,
-            created_at TEXT NOT NULL,
+            platform TEXT NOT NULL CHECK (platform IN ('ios','android','web')),
+            created_at INTEGER NOT NULL,
+            last_seen INTEGER,
             UNIQUE(device_token),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
+        CREATE INDEX push_tokens_lookup_idx ON push_tokens(user_id, platform, device_token);
+        CREATE INDEX push_tokens_user_last_seen_idx ON push_tokens(user_id, last_seen);
 
         CREATE TABLE user_prefs (
             user_id TEXT PRIMARY KEY,
             preferred_models TEXT,
             summary_models TEXT,
             summary_prompt_override TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
@@ -329,119 +292,68 @@ impl Migration for PipelineMigration {
             user_id TEXT NOT NULL,
             response_body BLOB,
             status INTEGER,
-            created_at TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-
-        CREATE INDEX links_user_updated_idx ON links(user_id, updated_at);
-        CREATE INDEX links_canonical_idx ON links(canonical_url);
-        CREATE INDEX link_saves_link_idx ON link_saves(link_id);
-        CREATE INDEX link_summaries_link_idx ON link_summaries(link_id);
-        CREATE INDEX push_tokens_user_idx ON push_tokens(user_id);
+        CREATE INDEX idempotency_keys_user_created_idx ON idempotency_keys(user_id, created_at);
         "#
     }
 
     fn down(&self) -> &'static str {
         r#"
-        DROP INDEX IF EXISTS push_tokens_user_idx;
-        DROP INDEX IF EXISTS link_summaries_link_idx;
-        DROP INDEX IF EXISTS link_saves_link_idx;
-        DROP INDEX IF EXISTS links_canonical_idx;
-        DROP INDEX IF EXISTS links_user_updated_idx;
+        -- Drop in reverse order of dependency to satisfy FKs and cleanup indexes.
 
+        DROP INDEX IF EXISTS idempotency_keys_user_created_idx;
         DROP TABLE IF EXISTS idempotency_keys;
+
         DROP TABLE IF EXISTS user_prefs;
+
+        DROP INDEX IF EXISTS push_tokens_user_last_seen_idx;
+        DROP INDEX IF EXISTS push_tokens_lookup_idx;
         DROP TABLE IF EXISTS push_tokens;
+
+        DROP INDEX IF EXISTS jobs_user_run_at_idx;
+        DROP INDEX IF EXISTS jobs_link_idx;
+        DROP TABLE IF EXISTS jobs;
+
+        DROP INDEX IF EXISTS link_summaries_link_idx;
+        DROP INDEX IF EXISTS link_summaries_link_model_unique;
         DROP TABLE IF EXISTS link_summaries;
+
+        DROP INDEX IF EXISTS link_tags_tag_idx;
         DROP TABLE IF EXISTS link_tags;
         DROP TABLE IF EXISTS tags;
+
+        DROP INDEX IF EXISTS link_saves_link_shared_idx;
         DROP TABLE IF EXISTS link_saves;
+
+        DROP INDEX IF EXISTS links_canonical_idx;
+        DROP INDEX IF EXISTS links_user_deleted_updated_idx;
+        DROP INDEX IF EXISTS links_user_canonical_unique;
         DROP TABLE IF EXISTS links;
-        "#
-    }
-}
 
-pub struct SoftDeleteMigration;
+        DROP INDEX IF EXISTS app_attest_keys_bundle_idx;
+        DROP TABLE IF EXISTS app_attest_keys;
 
-impl Migration for SoftDeleteMigration {
-    fn version(&self) -> &'static str {
-        "004"
-    }
+        DROP INDEX IF EXISTS app_attest_challenges_expires_idx;
+        DROP TABLE IF EXISTS app_attest_challenges;
 
-    fn name(&self) -> &'static str {
-        "soft_delete_links"
-    }
+        DROP INDEX IF EXISTS auth_tokens_refresh_token_hash_idx;
+        DROP INDEX IF EXISTS auth_tokens_token_hash_idx;
+        DROP INDEX IF EXISTS auth_tokens_user_platform_idx;
+        DROP INDEX IF EXISTS auth_tokens_refresh_expiration_idx;
+        DROP INDEX IF EXISTS auth_tokens_expiration_idx;
+        DROP INDEX IF EXISTS auth_tokens_user_revoked_expires_idx;
+        DROP TABLE IF EXISTS auth_tokens;
 
-    fn up(&self) -> &'static str {
-        r#"
-        ALTER TABLE links ADD COLUMN deleted_at TEXT;
-        CREATE INDEX links_user_deleted_idx ON links(user_id, deleted_at);
-        "#
-    }
+        DROP INDEX IF EXISTS sessions_user_expires_idx;
+        DROP TABLE IF EXISTS sessions;
 
-    fn down(&self) -> &'static str {
-        r#"
-        DROP INDEX IF EXISTS links_user_deleted_idx;
-        "#
-    }
-}
-
-pub struct AppAttestationKeyMaterialMigration;
-
-impl Migration for AppAttestationKeyMaterialMigration {
-    fn version(&self) -> &'static str {
-        "005"
-    }
-
-    fn name(&self) -> &'static str {
-        "app_attestation_key_material"
-    }
-
-    fn up(&self) -> &'static str {
-        r#"
-        ALTER TABLE app_attest_keys ADD COLUMN public_key TEXT;
-        ALTER TABLE app_attest_keys ADD COLUMN attestation_receipt TEXT;
-        "#
-    }
-
-    fn down(&self) -> &'static str {
-        r#"
-        -- No-op: SQLite/D1 does not support DROP COLUMN; leaving columns in place.
-        "#
-    }
-}
-
-pub struct AppAttestationCounterMigration;
-
-impl Migration for AppAttestationCounterMigration {
-    fn version(&self) -> &'static str {
-        "006"
-    }
-
-    fn name(&self) -> &'static str {
-        "app_attestation_counter"
-    }
-
-    fn up(&self) -> &'static str {
-        r#"
-        ALTER TABLE app_attest_keys ADD COLUMN counter INTEGER NOT NULL DEFAULT 0;
-        "#
-    }
-
-    fn down(&self) -> &'static str {
-        r#"
-        -- No-op: SQLite/D1 does not support DROP COLUMN; leaving column in place.
+        DROP TABLE IF EXISTS users;
         "#
     }
 }
 
 pub fn get_migrations() -> Vec<&'static dyn Migration> {
-    vec![
-        &InitialMigration,
-        &AppAttestationMigration,
-        &PipelineMigration,
-        &SoftDeleteMigration,
-        &AppAttestationKeyMaterialMigration,
-        &AppAttestationCounterMigration,
-    ]
+    vec![&InitialMigration]
 }

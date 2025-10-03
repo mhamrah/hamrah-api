@@ -25,9 +25,9 @@ fn test_link_struct_serialization() {
         content_hash: Some("abcdef".to_string()),
 
         save_count: 2,
-        created_at: "2024-06-01T12:00:00Z".to_string(),
-        updated_at: "2024-06-01T12:01:00Z".to_string(),
-        ready_at: Some("2024-06-01T12:02:00Z".to_string()),
+        created_at: 1717243200000,
+        updated_at: 1717243260000,
+        ready_at: Some(1717243320000),
         deleted_at: None,
     };
     let json = serde_json::to_string(&link).unwrap();
@@ -47,8 +47,8 @@ fn test_link_save_struct() {
         user_id: "user1".to_string(),
         source_app: Some("ios".to_string()),
         shared_text: Some("shared".to_string()),
-        shared_at: Some("2024-06-01T12:00:00Z".to_string()),
-        created_at: "2024-06-01T12:00:01Z".to_string(),
+        shared_at: Some(1717243200000),
+        created_at: 1717243201000,
     };
     let json = serde_json::to_string(&save).unwrap();
     let save2: LinkSave = serde_json::from_str(&json).unwrap();
@@ -91,8 +91,8 @@ fn test_link_summary_struct() {
         long_summary: Some("Long summary".to_string()),
         tags_json: Some(r#"[{"name":"news","confidence":0.9}]"#.to_string()),
         usage_json: Some(r#"{"tokens":100}"#.to_string()),
-        created_at: "2024-06-01T12:00:00Z".to_string(),
-        updated_at: "2024-06-01T12:01:00Z".to_string(),
+        created_at: 1717243200000,
+        updated_at: 1717243260000,
     };
     let json = serde_json::to_string(&summary).unwrap();
     let summary2: LinkSummary = serde_json::from_str(&json).unwrap();
@@ -108,11 +108,11 @@ fn test_job_struct() {
         link_id: "link1".to_string(),
         user_id: "user1".to_string(),
         kind: "process_link".to_string(),
-        run_at: "2024-06-01T12:00:00Z".to_string(),
+        run_at: 1717243200000,
         attempts: 1,
         last_error: Some("timeout".to_string()),
-        created_at: "2024-06-01T12:00:00Z".to_string(),
-        updated_at: "2024-06-01T12:01:00Z".to_string(),
+        created_at: 1717243200000,
+        updated_at: 1717243260000,
     };
     let json = serde_json::to_string(&job).unwrap();
     let job2: Job = serde_json::from_str(&json).unwrap();
@@ -128,7 +128,8 @@ fn test_push_token_struct() {
         user_id: "user1".to_string(),
         device_token: "devtoken".to_string(),
         platform: "ios".to_string(),
-        created_at: "2024-06-01T12:00:00Z".to_string(),
+        created_at: 1717243200000,
+        last_seen: Some(1717243260000),
     };
     let json = serde_json::to_string(&token).unwrap();
     let token2: PushToken = serde_json::from_str(&json).unwrap();
@@ -143,8 +144,8 @@ fn test_user_prefs_struct() {
         preferred_models: Some(r#"["@cf/meta/llama-3.1-8b-instruct"]"#.to_string()),
         summary_models: Some(r#"["@cf/meta/llama-3.1-8b-instruct"]"#.to_string()),
         summary_prompt_override: Some("Summarize in 3 sentences.".to_string()),
-        created_at: "2024-06-01T12:00:00Z".to_string(),
-        updated_at: "2024-06-01T12:01:00Z".to_string(),
+        created_at: 1717243200000,
+        updated_at: 1717243260000,
     };
     let json = serde_json::to_string(&prefs).unwrap();
     let prefs2: UserPrefs = serde_json::from_str(&json).unwrap();
@@ -162,7 +163,7 @@ fn test_idempotency_key_struct() {
         user_id: "user1".to_string(),
         response_body: Some(vec![1, 2, 3, 4]),
         status: Some(200),
-        created_at: "2024-06-01T12:00:00Z".to_string(),
+        created_at: 1717243200000,
     };
     let json = serde_json::to_string(&key).unwrap();
     let key2: IdempotencyKey = serde_json::from_str(&json).unwrap();

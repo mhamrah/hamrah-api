@@ -148,10 +148,10 @@ pub struct Link {
     // Archive fields removed; archiving is handled by the link pipeline
     pub content_hash: Option<String>,
     pub save_count: i64,
-    pub created_at: String,
-    pub updated_at: String,
-    pub ready_at: Option<String>,
-    pub deleted_at: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub ready_at: Option<i64>,
+    pub deleted_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -161,8 +161,8 @@ pub struct LinkSave {
     pub user_id: String,
     pub source_app: Option<String>,
     pub shared_text: Option<String>,
-    pub shared_at: Option<String>,
-    pub created_at: String,
+    pub shared_at: Option<i64>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -190,8 +190,8 @@ pub struct LinkSummary {
     pub long_summary: Option<String>,
     pub tags_json: Option<String>,
     pub usage_json: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -200,7 +200,8 @@ pub struct PushToken {
     pub user_id: String,
     pub device_token: String,
     pub platform: String,
-    pub created_at: String,
+    pub created_at: i64,
+    pub last_seen: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -209,8 +210,8 @@ pub struct UserPrefs {
     pub preferred_models: Option<String>,
     pub summary_models: Option<String>,
     pub summary_prompt_override: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -219,11 +220,11 @@ pub struct Job {
     pub link_id: String,
     pub user_id: String,
     pub kind: String,
-    pub run_at: String,
+    pub run_at: i64,
     pub attempts: i64,
     pub last_error: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -232,5 +233,5 @@ pub struct IdempotencyKey {
     pub user_id: String,
     pub response_body: Option<Vec<u8>>,
     pub status: Option<i64>,
-    pub created_at: String,
+    pub created_at: i64,
 }

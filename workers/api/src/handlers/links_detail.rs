@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::handlers::common::{LinkListItem, LinkPatchRequest};
 use crate::handlers::users::get_current_user_from_request;
 use crate::shared_handles::SharedHandles;
+use crate::utils::datetime_to_timestamp;
 use axum::{
     extract::{Extension, Path},
     http::HeaderMap,
@@ -52,7 +53,7 @@ pub async fn get_link_by_id(
         SELECT id, canonical_url, original_url, state, save_count,
                created_at, updated_at, title, description, site_name, image_url, favicon_url
         FROM links
-        WHERE id = ? AND user_id = ? AND state != 'deleted'
+        WHERE id = ? AND user_id = ? AND deleted_at IS NULL
         "#,
             )
             .bind(&id_q)
@@ -107,7 +108,7 @@ pub async fn patch_link_by_id(
         .db
         .run(move |mut db| async move {
             query_as::<(String,)>(
-                "SELECT id FROM links WHERE id = ? AND user_id = ? AND state != 'deleted'",
+                "SELECT id FROM links WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
             )
             .bind(&id_q)
             .bind(&user_id_q)
@@ -155,7 +156,7 @@ pub async fn patch_link_by_id(
     }
 
     update_fields.push("updated_at = ?");
-    bindings.push(Utc::now().to_rfc3339());
+    bindings.push(datetime_to_timestamp(Utc::now()).to_string());
     bindings.push(id.clone());
 
     let query_str = format!("UPDATE links SET {} WHERE id = ?", update_fields.join(", "));
@@ -234,9 +235,10 @@ pub async fn delete_link_by_id(
         .db
         .run(move |mut db| async move {
             let res = query(
-                "UPDATE links SET state = 'deleted', updated_at = ? WHERE id = ? AND user_id = ? AND state != 'deleted'"
+                "UPDATE links SET state = 'deleted', deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
             )
-            .bind(Utc::now().to_rfc3339())
+            .bind(datetime_to_timestamp(Utc::now()))
+            .bind(datetime_to_timestamp(Utc::now()))
             .bind(&id_q)
             .bind(&user_id_q)
             .execute(&mut db.conn)
@@ -250,5 +252,7 @@ pub async fn delete_link_by_id(
         return Err(Box::new(AppError::not_found("Link not found")));
     }
 
-    Ok(Json(json!({ "success": true, "id": id })))
+    Ok(Json(
+        json!({ "success": true, "id": id, "state": "deleted" }),
+    ))
 }

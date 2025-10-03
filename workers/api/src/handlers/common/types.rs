@@ -26,8 +26,8 @@ pub struct LinkListItem {
     pub original_url: String,
     pub state: String,
     pub save_count: i64,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: i64,
+    pub updated_at: i64,
     pub title: Option<String>,
     pub description: Option<String>,
     pub site_name: Option<String>,
@@ -39,7 +39,7 @@ pub struct LinkListItem {
 pub struct LinkCompactItem {
     pub id: String,
     pub canonical_url: String,
-    pub updated_at: String,
+    pub updated_at: i64,
     pub state: String,
 }
 
@@ -67,8 +67,8 @@ pub struct UserPrefsRow {
     pub preferred_models: Option<String>,
     pub summary_models: Option<String>,
     pub summary_prompt_override: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 // Push notification types

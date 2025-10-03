@@ -17,6 +17,10 @@ pub async fn get_links(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> AppResult<(StatusCode, HeaderMap, Json<serde_json::Value>)> {
+    worker::console_log!("🔍 DEBUG: Starting get_links handler");
+
+    let start_time = std::time::Instant::now();
+    worker::console_log!("🔍 DEBUG: Processing headers...");
     let header_pairs: Vec<(String, String)> = headers
         .iter()
         .filter_map(|(k, v)| {
@@ -25,9 +29,14 @@ pub async fn get_links(
                 .map(|s| (k.as_str().to_string(), s.to_string()))
         })
         .collect();
+
+    worker::console_log!("🔍 DEBUG: Starting user authentication...");
+    let auth_start = std::time::Instant::now();
+
     let user = handles
         .db
         .run(move |mut db| async move {
+            worker::console_log!("🔍 DEBUG: Inside DB executor for auth");
             let mut hdrs = HeaderMap::new();
             for (k, v) in header_pairs {
                 if let (Ok(name), Ok(value)) = (
@@ -37,20 +46,36 @@ pub async fn get_links(
                     hdrs.insert(name, value);
                 }
             }
-            get_current_user_from_request(&mut db, &hdrs).await
+            worker::console_log!("🔍 DEBUG: About to call get_current_user_from_request");
+            let result = get_current_user_from_request(&mut db, &hdrs).await;
+            worker::console_log!("🔍 DEBUG: get_current_user_from_request completed");
+            result
         })
         .await?;
 
+    worker::console_log!(
+        "🔍 DEBUG: User authentication completed in {:?}",
+        auth_start.elapsed()
+    );
+
+    worker::console_log!("🔍 DEBUG: Parsing query parameters...");
     let limit = params
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(100)
         .min(500);
 
-    let since = params
+    // since is an INTEGER timestamp (ms)
+    let since: i64 = params
         .get("since")
-        .cloned()
-        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    worker::console_log!(
+        "🔍 DEBUG: Query params - limit: {}, since(ms): {}",
+        limit,
+        since
+    );
 
     #[derive(sqlx::FromRow, Debug)]
     struct DeltaRow {
@@ -64,22 +89,29 @@ pub async fn get_links(
         lang: Option<String>,
         save_count: i64,
         state: String,
-        created_at: String,
-        updated_at: String,
-        shared_at: Option<String>,
+        created_at: i64,
+        updated_at: i64,
+        shared_at: Option<i64>,
     }
 
     #[derive(sqlx::FromRow)]
-    struct TagRow {
-        name: String,
+    struct LinkTagRow {
+        link_id: String,
+        tag_name: String,
     }
 
     let user_id_q = user.id.clone();
-    let since_q = since.clone();
+    let since_q: i64 = since;
     let limit_q = limit;
+
+    worker::console_log!("🔍 DEBUG: Starting main links query for user: {}", user.id);
+    let query_start = std::time::Instant::now();
+
+    // Query 1: Get the links
     let rows = handles
         .db
         .run(move |mut db| async move {
+            worker::console_log!("🔍 DEBUG: Inside DB executor for links query");
             query_as::<DeltaRow>(
                 r#"
         SELECT
@@ -95,7 +127,7 @@ pub async fn get_links(
           l.state,
           l.created_at,
           l.updated_at,
-          (SELECT MAX(shared_at) FROM link_saves ls WHERE ls.link_id = l.id) AS shared_at
+          (SELECT shared_at FROM link_saves ls WHERE ls.link_id = l.id ORDER BY shared_at DESC LIMIT 1) AS shared_at
         FROM links l
         WHERE l.user_id = ? AND l.deleted_at IS NULL AND l.updated_at > ?
         ORDER BY l.updated_at ASC
@@ -103,37 +135,88 @@ pub async fn get_links(
         "#,
             )
             .bind(&user_id_q)
-            .bind(&since_q)
+            .bind(since_q)
             .bind(limit_q)
             .fetch_all(&mut db.conn)
             .await
         })
         .await
-        .map_err(|e| format!("Database error: {}", e))?;
+        .map_err(|e| {
+            worker::console_log!("🔍 DEBUG: Links query failed: {}", e);
+            format!("Database error: {}", e)
+        })?;
 
-    let mut out_links = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let row_id_q = row.id.clone();
+    worker::console_log!(
+        "🔍 DEBUG: Main links query completed in {:?}, found {} rows",
+        query_start.elapsed(),
+        rows.len()
+    );
+
+    // Query 2: Get all tags for these links in one batch
+    worker::console_log!("🔍 DEBUG: Starting tags query...");
+    let tags_start = std::time::Instant::now();
+    let mut tags_map: HashMap<String, Vec<String>> = HashMap::new();
+
+    if !rows.is_empty() {
+        worker::console_log!("🔍 DEBUG: Preparing tags query for {} links", rows.len());
+        let link_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+        let placeholders = link_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+
+        let tag_query = format!(
+            r#"
+            SELECT lt.link_id, t.name as tag_name
+            FROM link_tags lt
+            JOIN tags t ON t.id = lt.tag_id
+            WHERE lt.link_id IN ({})
+            ORDER BY lt.link_id, t.name ASC
+            "#,
+            placeholders
+        );
+
         let tag_rows = handles
             .db
             .run(move |mut db| async move {
-                query_as::<TagRow>(
-                    r#"
-            SELECT t.name as name
-            FROM link_tags lt
-            JOIN tags t ON t.id = lt.tag_id
-            WHERE lt.link_id = ?
-            ORDER BY t.name ASC
-            "#,
-                )
-                .bind(&row_id_q)
-                .fetch_all(&mut db.conn)
-                .await
+                worker::console_log!("🔍 DEBUG: Inside DB executor for tags query");
+                let mut q = query_as::<LinkTagRow>(&tag_query);
+                for link_id in link_ids {
+                    q = q.bind(link_id);
+                }
+                worker::console_log!("🔍 DEBUG: About to execute tags query");
+                let result = q.fetch_all(&mut db.conn).await;
+                worker::console_log!("🔍 DEBUG: Tags query executed");
+                result
             })
             .await
-            .map_err(|e| format!("Database error: {}", e))?;
+            .map_err(|e| {
+                worker::console_log!("🔍 DEBUG: Tags query failed: {}", e);
+                format!("Database error fetching tags: {}", e)
+            })?;
 
-        let tags: Vec<String> = tag_rows.into_iter().map(|t| t.name).collect();
+        worker::console_log!(
+            "🔍 DEBUG: Tags query completed in {:?}, found {} tag rows",
+            tags_start.elapsed(),
+            tag_rows.len()
+        );
+
+        // Group tags by link_id
+        worker::console_log!("🔍 DEBUG: Grouping tags by link_id...");
+        for tag_row in tag_rows {
+            tags_map
+                .entry(tag_row.link_id)
+                .or_default()
+                .push(tag_row.tag_name);
+        }
+        worker::console_log!("🔍 DEBUG: Tags grouped for {} links", tags_map.len());
+    } else {
+        worker::console_log!("🔍 DEBUG: No links found, skipping tags query");
+    }
+
+    // Combine links with their tags
+    worker::console_log!("🔍 DEBUG: Building response JSON...");
+    let json_start = std::time::Instant::now();
+    let mut out_links = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let tags = tags_map.get(&row.id).cloned().unwrap_or_default();
 
         out_links.push(json!({
             "id": row.id,
@@ -152,14 +235,26 @@ pub async fn get_links(
         }));
     }
 
-    let next_cursor = if (rows.len() as i64) == limit {
-        rows.last().map(|r| r.updated_at.clone())
+    worker::console_log!(
+        "🔍 DEBUG: JSON building completed in {:?}",
+        json_start.elapsed()
+    );
+
+    // next_cursor is an i64 (ms)
+    let next_cursor: Option<i64> = if (rows.len() as i64) == limit {
+        rows.last().map(|r| r.updated_at)
     } else {
         None
     };
 
     let mut headers = HeaderMap::new();
     headers.insert("Cache-Control", "no-store".parse().unwrap());
+
+    worker::console_log!(
+        "🔍 DEBUG: get_links handler completed in {:?}, returning {} links",
+        start_time.elapsed(),
+        out_links.len()
+    );
 
     Ok((
         StatusCode::OK,
@@ -206,35 +301,33 @@ pub async fn get_links_compact(
         .unwrap_or(100)
         .min(500);
 
-    let since = params.get("since");
+    let since_i64 = params.get("since").and_then(|s| s.parse::<i64>().ok());
 
     let mut query_str = String::from(
         r#"
         SELECT id, canonical_url, updated_at, state
         FROM links
-        WHERE user_id = ? AND state != 'deleted'
+        WHERE user_id = ? AND deleted_at IS NULL
         "#,
     );
 
-    let mut bindings = vec![user.id.clone()];
-
-    if let Some(since_time) = since {
+    if since_i64.is_some() {
         query_str.push_str(" AND updated_at > ?");
-        bindings.push(since_time.clone());
     }
 
     query_str.push_str(" ORDER BY updated_at DESC LIMIT ?");
-    bindings.push(limit.to_string());
 
     let query_str2 = query_str.clone();
-    let bindings2 = bindings.clone();
+    let user_id_q = user.id.clone();
     let rows = handles
         .db
         .run(move |mut db| async move {
             let mut q = query_as::<LinkCompactItem>(&query_str2);
-            for b in bindings2 {
-                q = q.bind(b);
+            q = q.bind(&user_id_q);
+            if let Some(since_val) = since_i64 {
+                q = q.bind(since_val);
             }
+            q = q.bind(limit);
             q.fetch_all(&mut db.conn).await
         })
         .await

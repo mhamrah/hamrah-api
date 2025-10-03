@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::handlers::common::PushRegisterRequest;
 use crate::handlers::users::get_current_user_from_request;
 use crate::shared_handles::SharedHandles;
+use crate::utils::datetime_to_timestamp;
 use axum::{http::HeaderMap, response::Json, Json as JsonExtractor};
 use chrono::Utc;
 use serde_json::json;
@@ -44,7 +45,7 @@ pub async fn post_push_register(
         return Err(Box::new(AppError::bad_request("Invalid platform")));
     }
 
-    let now = Utc::now().to_rfc3339();
+    let now = datetime_to_timestamp(Utc::now());
 
     // Check if token already exists for this user/platform combination
     let user_id_q = user.id.clone();
@@ -53,14 +54,10 @@ pub async fn post_push_register(
     let existing = handles
         .db
         .run(move |mut db| async move {
-            query_as::<(String,)>(
-                "SELECT id FROM push_tokens WHERE user_id = ? AND platform = ? AND device_token = ?",
-            )
-            .bind(&user_id_q)
-            .bind(&platform_q)
-            .bind(&device_token_q)
-            .fetch_optional(&mut db.conn)
-            .await
+            query_as::<(String,)>("SELECT id FROM push_tokens WHERE device_token = ?")
+                .bind(&device_token_q)
+                .fetch_optional(&mut db.conn)
+                .await
         })
         .await
         .map_err(AppError::from)?;
@@ -75,11 +72,11 @@ pub async fn post_push_register(
             .db
             .run(move |mut db| async move {
                 query(
-                    "UPDATE push_tokens SET last_seen = ? WHERE user_id = ? AND platform = ? AND device_token = ?",
+                    "UPDATE push_tokens SET user_id = ?, platform = ?, last_seen = ? WHERE device_token = ?",
                 )
-                .bind(&now_q)
                 .bind(&user_id_q2)
                 .bind(&platform_q2)
+                .bind(&now_q)
                 .bind(&device_token_q2)
                 .execute(&mut db.conn)
                 .await
@@ -107,6 +104,10 @@ pub async fn post_push_register(
                 r#"
         INSERT INTO push_tokens (id, user_id, device_token, platform, created_at, last_seen)
         VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_token) DO UPDATE SET
+            user_id = excluded.user_id,
+            platform = excluded.platform,
+            last_seen = excluded.last_seen
         "#,
             )
             .bind(&token_id_q)

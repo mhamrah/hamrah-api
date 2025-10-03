@@ -109,7 +109,7 @@ pub async fn put_user_prefs(
         })
         .await?;
 
-    let now = Utc::now().to_rfc3339();
+    let now = crate::utils::datetime_to_timestamp(Utc::now());
 
     // Check if preferences already exist
     let user_id_q = user.id.clone();

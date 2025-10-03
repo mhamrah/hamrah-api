@@ -46,7 +46,7 @@ pub async fn get_link_tags(
         .db
         .run(move |mut db| async move {
             query_as::<(String,)>(
-                "SELECT id FROM links WHERE id = ? AND user_id = ? AND state != 'deleted'",
+                "SELECT id FROM links WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
             )
             .bind(&id_q)
             .bind(&user_id_q)
@@ -67,10 +67,11 @@ pub async fn get_link_tags(
         .run(move |mut db| async move {
             query_as::<LinkTagView>(
                 r#"
-        SELECT tag_name
-        FROM link_tags
-        WHERE link_id = ?
-        ORDER BY tag_name
+        SELECT t.name AS tag_name
+        FROM link_tags lt
+        JOIN tags t ON t.id = lt.tag_id
+        WHERE lt.link_id = ?
+        ORDER BY t.name
         "#,
             )
             .bind(&id_q2)
@@ -125,12 +126,13 @@ pub async fn get_user_tags(
         .run(move |mut db| async move {
             query_as::<TagSummary>(
                 r#"
-        SELECT lt.tag_name, COUNT(*) as count
+        SELECT t.name AS tag_name, COUNT(*) as count
         FROM link_tags lt
         INNER JOIN links l ON lt.link_id = l.id
-        WHERE l.user_id = ? AND l.state != 'deleted'
-        GROUP BY lt.tag_name
-        ORDER BY count DESC, lt.tag_name
+        INNER JOIN tags t ON t.id = lt.tag_id
+        WHERE l.user_id = ? AND l.deleted_at IS NULL
+        GROUP BY t.name
+        ORDER BY count DESC, t.name
         "#,
             )
             .bind(&user_id_q)

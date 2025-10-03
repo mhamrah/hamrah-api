@@ -176,43 +176,6 @@ pub fn app_router() -> Router<()> {
                     crate::auth::app_attestation::require_ios_app_attestation,
                 )),
         )
-        // WebAuthn data persistence endpoints (called by hamrah-web)
-        .route(
-            "/api/webauthn/credentials",
-            post(handlers::webauthn_data::store_webauthn_credential),
-        )
-        .route(
-            "/api/webauthn/credentials/{credential_id}",
-            get(handlers::webauthn_data::get_webauthn_credential),
-        )
-        .route(
-            "/api/webauthn/credentials/{credential_id}",
-            delete(handlers::webauthn_data::delete_webauthn_credential),
-        )
-        .route(
-            "/api/webauthn/credentials/{credential_id}/counter",
-            patch(handlers::webauthn_data::update_webauthn_credential_counter),
-        )
-        .route(
-            "/api/webauthn/credentials/{credential_id}/name",
-            patch(handlers::webauthn_data::update_webauthn_credential_name),
-        )
-        .route(
-            "/api/webauthn/users/{user_id}/credentials",
-            get(handlers::webauthn_data::get_user_webauthn_credentials),
-        )
-        .route(
-            "/api/webauthn/challenges",
-            post(handlers::webauthn_data::store_webauthn_challenge),
-        )
-        .route(
-            "/api/webauthn/challenges/{challenge_id}",
-            get(handlers::webauthn_data::get_webauthn_challenge),
-        )
-        .route(
-            "/api/webauthn/challenges/{challenge_id}",
-            delete(handlers::webauthn_data::delete_webauthn_challenge),
-        )
         .layer(
             CorsLayer::new()
                 .allow_origin([

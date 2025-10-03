@@ -8,7 +8,6 @@ pub mod push;
 pub mod tags;
 pub mod user_prefs;
 pub mod users;
-pub mod webauthn_data;
 
 pub mod common;
 
@@ -55,7 +54,7 @@ pub async fn post_link_refresh(
             })
             .await?;
 
-    let now_iso = Utc::now().to_rfc3339();
+    let now_ts = crate::utils::datetime_to_timestamp(Utc::now());
 
     // Ensure link belongs to user
     let id_q = id.clone();
@@ -80,12 +79,12 @@ pub async fn post_link_refresh(
     // Update link state to pending
     let id_q2 = id.clone();
     let user_id_q2 = user.id.clone();
-    let now_iso_q = now_iso.clone();
+    let now_ts_q = now_ts;
     handles
         .db
         .run(move |mut db| async move {
             query("UPDATE links SET state = 'pending', updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
-                .bind(&now_iso_q)
+                .bind(now_ts_q)
                 .bind(&id_q2)
                 .bind(&user_id_q2)
                 .execute(&mut db.conn)

@@ -141,7 +141,8 @@ impl Database {
     ) -> Result<Option<LinkSummary>, DbError> {
         let row = query_as::<LinkSummary>(
             r#"
-            SELECT * FROM link_summaries
+            SELECT id, link_id, user_id, model_id, prompt_version, prompt_text, short_summary, long_summary, tags_json, usage_json, created_at, updated_at
+            FROM link_summaries
             WHERE link_id = ? AND model_id = ?
             ORDER BY created_at DESC
             LIMIT 1
@@ -185,11 +186,12 @@ impl Database {
     pub async fn insert_push_token(&self, token: &PushToken) -> Result<(), DbError> {
         query(
             r#"
-            INSERT INTO push_tokens (id, user_id, device_token, platform, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO push_tokens (id, user_id, device_token, platform, created_at, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_token) DO UPDATE SET
                 user_id = excluded.user_id,
-                platform = excluded.platform
+                platform = excluded.platform,
+                last_seen = excluded.last_seen
             "#,
         )
         .bind(&token.id)
@@ -197,6 +199,7 @@ impl Database {
         .bind(&token.device_token)
         .bind(&token.platform)
         .bind(&token.created_at)
+        .bind(&token.last_seen)
         .execute(&self.conn)
         .await?;
         Ok(())

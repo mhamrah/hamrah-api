@@ -74,215 +74,23 @@ pub struct ChallengeResponse {
 /// POST /api/webauthn/credentials
 /// Store a new WebAuthn credential
 pub async fn store_webauthn_credential(
-    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
-    JsonExtractor(payload): JsonExtractor<StoreCredentialRequest>,
+    axum::extract::Extension(_handles): axum::extract::Extension<SharedHandles>,
+    JsonExtractor(_payload): JsonExtractor<StoreCredentialRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let now = datetime_to_timestamp(Utc::now());
-
-    // Pre-base64 summary log (raw lengths)
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API store_webauthn_credential: START id={}; user_id={}; counter={}; transports_count={}; aaguid_len={}; credential_type={}; user_verified={}; credential_device_type={:?}; credential_backed_up={}; name_present={}; public_key_raw_len={}",
-        payload.id,
-        payload.user_id,
-        payload.counter,
-        payload.transports.as_ref().map(|t| t.len()).unwrap_or(0),
-        payload.aaguid.as_ref().map(|a| a.len()).unwrap_or(0),
-        payload.credential_type,
-        payload.user_verified,
-        payload.credential_device_type,
-        payload.credential_backed_up,
-        payload.name.is_some(),
-        payload.public_key.len()
-    );
-
-    // Convert Vec<u8> to base64 string for storage
-    let public_key_b64 = BASE64_STANDARD.encode(&payload.public_key);
-    let aaguid_b64 = payload.aaguid.as_ref().map(|a| BASE64_STANDARD.encode(a));
-    let transports_json = payload
-        .transports
-        .as_ref()
-        .map(|t| serde_json::to_string(t).unwrap_or_default());
-
-    // Detailed transformed log including full base64 (DEV INTENTIONAL - requested full verbosity)
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API store_webauthn_credential: TRANSFORM id={}; public_key_b64_len={}; public_key_b64={}; aaguid_b64_len={}; aaguid_b64={:?}; transports_json_len={}; transports_json={:?}; name={:?}",
-        payload.id,
-        public_key_b64.len(),
-        public_key_b64,
-        aaguid_b64.as_ref().map(|s| s.len()).unwrap_or(0),
-        aaguid_b64,
-        transports_json.as_ref().map(|s| s.len()).unwrap_or(0),
-        transports_json,
-        payload.name
-    );
-
-    let insert_start = datetime_to_timestamp(Utc::now());
-    let result = handles
-        .db
-        .run({
-            let id_q = payload.id.clone();
-            let user_id_q = payload.user_id.clone();
-            let public_key_b64_q = public_key_b64.clone();
-            let transports_json_q = transports_json.clone();
-            let aaguid_b64_q = aaguid_b64.clone();
-            let credential_type_q = payload.credential_type.clone();
-            let user_verified_q = if payload.user_verified { 1i64 } else { 0i64 };
-            let credential_device_type_q = payload.credential_device_type.clone();
-            let credential_backed_up_q = if payload.credential_backed_up { 1i64 } else { 0i64 };
-            let name_q = payload.name.clone();
-            let now_q = now;
-            move |mut db| async move {
-                query(
-                    r#"INSERT INTO webauthn_credentials
-                       (id, user_id, public_key, counter, transports, aaguid, credential_type,
-                        user_verified, credential_device_type, credential_backed_up, name, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-                )
-                .bind(&id_q)
-                .bind(&user_id_q)
-                .bind(&public_key_b64_q)
-                .bind(payload.counter)
-                .bind(transports_json_q.as_deref())
-                .bind(aaguid_b64_q.as_deref())
-                .bind(&credential_type_q)
-                .bind(user_verified_q)
-                .bind(credential_device_type_q.as_deref())
-                .bind(credential_backed_up_q)
-                .bind(name_q.as_deref())
-                .bind(now_q)
-                .execute(&mut db.conn)
-                .await
-            }
-        })
-        .await;
-
-    match result {
-        Ok(_) => {
-            let end = datetime_to_timestamp(Utc::now());
-            worker::console_log!(
-                "💽 WEBAUTHN/DB store_webauthn_credential: SUCCESS id={}; duration_ms={}",
-                payload.id,
-                end - insert_start
-            );
-        }
-        Err(e) => {
-            worker::console_log!(
-                "💽 WEBAUTHN/DB store_webauthn_credential: ERROR id={}; error={:?}",
-                payload.id,
-                e
-            );
-            return Err(Box::new(AppError::from(e)));
-        }
-    }
-
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API store_webauthn_credential: COMPLETE id={}",
-        payload.id
-    );
-
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "message": "Credential stored successfully"
-    })))
+    Err(Box::new(AppError::not_found(
+        "WebAuthn endpoints have been removed",
+    )))
 }
 
 /// GET /api/webauthn/credentials/{credential_id}
 /// Get a specific WebAuthn credential by ID
 pub async fn get_webauthn_credential(
-    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
-    Path(credential_id): Path<String>,
+    axum::extract::Extension(_handles): axum::extract::Extension<SharedHandles>,
+    Path(_credential_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API get_webauthn_credential: START id={}",
-        credential_id
-    );
-    let query_start = datetime_to_timestamp(Utc::now());
-    let credential = handles
-        .db
-        .run({
-            let credential_id_q = credential_id.clone();
-            move |mut db| async move {
-                query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
-                    .bind(&credential_id_q)
-                    .fetch_optional(&mut db.conn)
-                    .await
-            }
-        })
-        .await
-        .map_err(|e| {
-            worker::console_log!(
-                "💽 WEBAUTHN/DB get_webauthn_credential: ERROR id={}; error={:?}",
-                credential_id,
-                e
-            );
-            format!("Database error: {:?}", e)
-        })
-        .map_err(AppError::from)?;
-    let query_end = datetime_to_timestamp(Utc::now());
-    worker::console_log!(
-        "💽 WEBAUTHN/DB get_webauthn_credential: SUCCESS id={}; found={}; duration_ms={}",
-        credential_id,
-        credential.is_some(),
-        query_end - query_start
-    );
-
-    match credential {
-        Some(cred) => {
-            worker::console_log!(
-                "🛠️ WEBAUTHN/API get_webauthn_credential: FOUND id={}; user_id={}; counter={}; transports_len={}; aaguid_len={}; name_present={}",
-                cred.id,
-                cred.user_id,
-                cred.counter,
-                cred.transports.as_ref().map(|s| s.len()).unwrap_or(0),
-                cred.aaguid.as_ref().map(|s| s.len()).unwrap_or(0),
-                cred.name.is_some()
-            );
-            // Convert base64 strings back to Vec<u8>
-            let public_key = BASE64_STANDARD
-                .decode(&cred.public_key)
-                .map_err(|e| format!("Failed to decode public key: {:?}", e))?;
-
-            let aaguid = cred
-                .aaguid
-                .as_ref()
-                .map(|a| BASE64_STANDARD.decode(a))
-                .transpose()
-                .map_err(|e| format!("Failed to decode aaguid: {:?}", e))?;
-
-            let transports: Option<Vec<String>> = cred
-                .transports
-                .as_ref()
-                .map(|t| serde_json::from_str(t).unwrap_or_default());
-
-            let response = CredentialResponse {
-                id: cred.id,
-                user_id: cred.user_id,
-                public_key,
-                counter: cred.counter,
-                transports,
-                aaguid,
-                credential_type: cred.credential_type,
-                user_verified: cred.user_verified != 0, // Convert i64 to bool
-                credential_device_type: cred.credential_device_type,
-                credential_backed_up: cred.credential_backed_up != 0, // Convert i64 to bool
-                name: cred.name,
-                last_used: cred.last_used,
-                created_at: cred.created_at,
-            };
-
-            Ok(Json(serde_json::json!({
-                "success": true,
-                "credential": response
-            })))
-        }
-        None => {
-            worker::console_log!(
-                "🛠️ WEBAUTHN/API get_webauthn_credential: NOT_FOUND id={}",
-                credential_id
-            );
-            Err(Box::new(AppError::not_found("Credential not found")))
-        }
-    }
+    Err(Box::new(AppError::not_found(
+        "WebAuthn endpoints have been removed",
+    )))
 }
 
 /// GET /api/webauthn/users/{user_id}/credentials
@@ -292,10 +100,9 @@ pub async fn get_user_webauthn_credentials(
     Path(user_id): Path<String>,
     headers: HeaderMap,
 ) -> AppResult<Json<serde_json::Value>> {
-    worker::console_log!(
-        "🔑 WEBAUTHN: Starting get_user_webauthn_credentials for user_id: {}",
-        user_id
-    );
+    return Err(Box::new(AppError::not_found(
+        "WebAuthn endpoints have been removed",
+    )));
 
     // Authenticate user
     worker::console_log!("🔑 WEBAUTHN: Attempting to authenticate user...");
@@ -360,9 +167,7 @@ pub async fn get_user_webauthn_credentials(
     let credentials = match handles
         .db
         .run(move |mut db| async move {
-            query_as::<WebAuthnCredential>(
-                "SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC",
-            )
+            return Err(Box::new(AppError::not_found("WebAuthn endpoints have been removed")));
             .bind(&user_id_q)
             .fetch_all(&mut db.conn)
             .await
@@ -677,7 +482,7 @@ pub async fn delete_webauthn_credential(
         .run({
             let credential_id_q = credential_id.clone();
             move |mut db| async move {
-                query("DELETE FROM webauthn_credentials WHERE id = ?")
+                return Err(Box::new(AppError::not_found("WebAuthn endpoints have been removed")));
                     .bind(&credential_id_q)
                     .execute(&mut db.conn)
                     .await
@@ -795,7 +600,7 @@ pub async fn update_webauthn_credential_name(
         .run({
             let credential_id_q = credential_id.clone();
             move |mut db| async move {
-                query_as::<WebAuthnCredential>("SELECT * FROM webauthn_credentials WHERE id = ?")
+                return Err(Box::new(AppError::not_found("WebAuthn endpoints have been removed")));
                     .bind(&credential_id_q)
                     .fetch_optional(&mut db.conn)
                     .await
@@ -866,7 +671,7 @@ pub async fn update_webauthn_credential_name(
             let name_q = name.to_string();
             let credential_id_q = credential_id.clone();
             move |mut db| async move {
-                query("UPDATE webauthn_credentials SET name = ? WHERE id = ?")
+                return Err(Box::new(AppError::not_found("WebAuthn endpoints have been removed")));
                     .bind(&name_q)
                     .bind(&credential_id_q)
                     .execute(&mut db.conn)
@@ -909,159 +714,23 @@ pub async fn update_webauthn_credential_name(
 /// POST /api/webauthn/challenges
 /// Store a WebAuthn challenge
 pub async fn store_webauthn_challenge(
-    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
-    JsonExtractor(payload): JsonExtractor<StoreChallengeRequest>,
+    axum::extract::Extension(_handles): axum::extract::Extension<SharedHandles>,
+    JsonExtractor(_payload): JsonExtractor<StoreChallengeRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let now = datetime_to_timestamp(Utc::now());
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API store_webauthn_challenge: START id={}; type={}; user_id_present={}; expires_at={}",
-        payload.id,
-        payload.challenge_type,
-        payload.user_id.is_some(),
-        payload.expires_at
-    );
-
-    let insert_start = datetime_to_timestamp(Utc::now());
-    let result = handles
-        .db
-        .run({
-            let id_q = payload.id.clone();
-            let challenge_q = payload.challenge.clone();
-            let user_id_q = payload.user_id.clone();
-            let challenge_type_q = payload.challenge_type.clone();
-            let expires_q = payload.expires_at;
-            let now_q = now;
-            move |mut db| async move {
-                query(
-                    "INSERT INTO webauthn_challenges (id, challenge, user_id, type, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-                )
-                .bind(&id_q)
-                .bind(&challenge_q)
-                .bind(user_id_q.as_deref())
-                .bind(&challenge_type_q)
-                .bind(expires_q)
-                .bind(now_q)
-                .execute(&mut db.conn)
-                .await
-            }
-        })
-        .await;
-
-    match result {
-        Ok(_) => {
-            let insert_end = datetime_to_timestamp(Utc::now());
-            worker::console_log!(
-                "💽 WEBAUTHN/DB store_webauthn_challenge: SUCCESS id={}; duration_ms={}; challenge_len={}",
-                payload.id,
-                insert_end - insert_start,
-                payload.challenge.len()
-            );
-        }
-        Err(e) => {
-            worker::console_log!(
-                "💽 WEBAUTHN/DB store_webauthn_challenge: ERROR id={}; error={:?}",
-                payload.id,
-                e
-            );
-            return Err(Box::new(AppError::from(e)));
-        }
-    }
-
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API store_webauthn_challenge: COMPLETE id={}",
-        payload.id
-    );
-
-    Ok(Json(serde_json::json!({
-        "success": true,
-        "message": "Challenge stored successfully"
-    })))
+    Err(Box::new(AppError::not_found(
+        "WebAuthn endpoints have been removed",
+    )))
 }
 
 /// GET /api/webauthn/challenges/{challenge_id}
 /// Get a WebAuthn challenge
 pub async fn get_webauthn_challenge(
-    axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
-    Path(challenge_id): Path<String>,
+    axum::extract::Extension(_handles): axum::extract::Extension<SharedHandles>,
+    Path(_challenge_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
-    worker::console_log!(
-        "🛠️ WEBAUTHN/API get_webauthn_challenge: START id={}",
-        challenge_id
-    );
-    let query_start = datetime_to_timestamp(Utc::now());
-    let challenge_res = handles
-        .db
-        .run({
-            let challenge_id_q = challenge_id.clone();
-            move |mut db| async move {
-                query_as::<WebAuthnChallenge>(
-                    "SELECT id, challenge, user_id, type as challenge_type, expires_at, created_at FROM webauthn_challenges WHERE id = ?"
-                )
-                .bind(&challenge_id_q)
-                .fetch_optional(&mut db.conn)
-                .await
-            }
-        })
-        .await;
-    let query_end = datetime_to_timestamp(Utc::now());
-
-    let challenge = match challenge_res {
-        Ok(c) => {
-            worker::console_log!(
-                "💽 WEBAUTHN/DB get_webauthn_challenge: SUCCESS id={}; found={}; duration_ms={}",
-                challenge_id,
-                c.is_some(),
-                query_end - query_start
-            );
-            c
-        }
-        Err(e) => {
-            worker::console_log!(
-                "💽 WEBAUTHN/DB get_webauthn_challenge: ERROR id={}; error={:?}",
-                challenge_id,
-                e
-            );
-            return Err(Box::new(AppError::from(e)));
-        }
-    };
-
-    match challenge {
-        Some(chal) => {
-            worker::console_log!(
-                "🛠️ WEBAUTHN/API get_webauthn_challenge: FOUND id={}; type={}; user_id_present={}; expires_at={}; challenge_len={}",
-                chal.id,
-                chal.challenge_type,
-                chal.user_id.is_some(),
-                chal.expires_at,
-                chal.challenge.len()
-            );
-            let response = ChallengeResponse {
-                id: chal.id,
-                challenge: chal.challenge,
-                user_id: chal.user_id,
-                challenge_type: chal.challenge_type,
-                expires_at: chal.expires_at,
-                created_at: chal.created_at,
-            };
-
-            worker::console_log!(
-                "🛠️ WEBAUTHN/API get_webauthn_challenge: COMPLETE id={}",
-                response.id
-            );
-
-            Ok(Json(serde_json::json!({
-                "success": true,
-                "challenge": response
-            })))
-        }
-        None => {
-            worker::console_log!(
-                "🛠️ WEBAUTHN/API get_webauthn_challenge: NOT_FOUND id={}",
-                challenge_id
-            );
-            Err(Box::new(AppError::not_found("Challenge not found")))
-        }
-    }
+    Err(Box::new(AppError::not_found(
+        "WebAuthn endpoints have been removed",
+    )))
 }
 
 /// DELETE /api/webauthn/challenges/{challenge_id}
@@ -1080,7 +749,7 @@ pub async fn delete_webauthn_challenge(
         .run({
             let challenge_id_q = challenge_id.clone();
             move |mut db| async move {
-                query("DELETE FROM webauthn_challenges WHERE id = ?")
+                return Err(Box::new(AppError::not_found("WebAuthn endpoints have been removed")));
                     .bind(&challenge_id_q)
                     .execute(&mut db.conn)
                     .await

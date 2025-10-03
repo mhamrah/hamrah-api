@@ -67,7 +67,7 @@ pub async fn post_links(
     }
 
     let mut results = Vec::new();
-    let now_iso = Utc::now().to_rfc3339();
+    let now_ts = crate::utils::datetime_to_timestamp(Utc::now());
 
     for item in items {
         // Validate URL
@@ -91,123 +91,83 @@ pub async fn post_links(
             }
         };
 
-        // Check for existing link
+        // Upsert link and record save transactionally (INTEGER timestamps)
         let user_id_q = user.id.clone();
-        let canonical_url_q = canonical_url.clone();
-        let existing = handles
-            .db
-            .run(move |mut db| async move {
-                query_as::<LinkCompactItem>(
-                    r#"
-            SELECT id, canonical_url, updated_at, state
-            FROM links
-            WHERE user_id = ? AND canonical_url = ?
-            "#,
-                )
-                .bind(&user_id_q)
-                .bind(&canonical_url_q)
-                .fetch_optional(&mut db.conn)
-                .await
-            })
-            .await
-            .map_err(AppError::from)?;
+        let url_q = item.url.clone();
+        let canonical_q = canonical_url.clone();
+        let host_q = host.clone();
+        let client_id_q = item.client_id.clone();
+        let source_app_q = item.source_app.clone();
+        let shared_text_q = item.shared_text.clone();
+        let save_id = Uuid::new_v4().to_string();
+        let now_q = now_ts;
 
-        let link_id = if let Some(row) = existing {
-            // Update existing link (no metadata fetching here)
-            {
-                let now_iso_q = now_iso.clone();
-                let row_id_q = row.id.clone();
-                handles
+        let link_id: String = handles
                     .db
                     .run(move |mut db| async move {
-                        query(
-                            r#"
-                UPDATE links
-                SET save_count = save_count + 1,
-                    updated_at = ?
-                WHERE id = ?
-                "#,
-                        )
-                        .bind(&now_iso_q)
-                        .bind(&row_id_q)
-                        .execute(&mut db.conn)
-                        .await
-                    })
-                    .await
-                    .map_err(AppError::from)?;
-            }
+                        // Begin transaction
+                        query("BEGIN").execute(&mut db.conn).await?;
 
-            row.id
-        } else {
-            // Create new link (minimal fields)
-            let new_id = Uuid::new_v4().to_string();
-            {
-                let new_id_q = new_id.clone();
-                let user_id_q = user.id.clone();
-                let url_q = item.url.clone();
-                let canonical_q = canonical_url.clone();
-                let host_q = host.clone();
-                let now_q = now_iso.clone();
-                handles
-                    .db
-                    .run(move |mut db| async move {
+                        // Upsert link (revive if soft-deleted)
+                        let new_id = Uuid::new_v4().to_string();
                         query(
                             r#"
-                INSERT INTO links (
-                    id, user_id, original_url, canonical_url, host,
-                    state, save_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, 'new', 1, ?, ?)
-                "#,
+                        INSERT INTO links (
+                            id, user_id, client_id, original_url, canonical_url, host,
+                            state, save_count, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'new', 1, ?, ?)
+                        ON CONFLICT(user_id, canonical_url) DO UPDATE SET
+                            save_count = links.save_count + 1,
+                            updated_at = excluded.updated_at,
+                            state = CASE WHEN links.deleted_at IS NOT NULL THEN 'new' ELSE links.state END,
+                            deleted_at = NULL,
+                            client_id = COALESCE(links.client_id, excluded.client_id)
+                        "#,
                         )
-                        .bind(&new_id_q)
+                        .bind(&new_id)
                         .bind(&user_id_q)
+                        .bind(&client_id_q)
                         .bind(&url_q)
                         .bind(&canonical_q)
                         .bind(&host_q)
-                        .bind(&now_q)
-                        .bind(&now_q)
+                        .bind(now_q)
+                        .bind(now_q)
                         .execute(&mut db.conn)
-                        .await
+                        .await?;
+
+                        // Resolve link_id after upsert
+                        let (resolved_id,): (String,) =
+                            query_as("SELECT id FROM links WHERE user_id = ? AND canonical_url = ?")
+                                .bind(&user_id_q)
+                                .bind(&canonical_q)
+                                .fetch_one(&mut db.conn)
+                                .await?;
+
+                        // Insert save
+                        query(
+                            r#"
+                        INSERT INTO link_saves (
+                            id, link_id, user_id, source_app, shared_text, shared_at, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        "#,
+                        )
+                        .bind(&save_id)
+                        .bind(&resolved_id)
+                        .bind(&user_id_q)
+                        .bind(&source_app_q)
+                        .bind(&shared_text_q)
+                        .bind(Option::<i64>::None)
+                        .bind(now_q)
+                        .execute(&mut db.conn)
+                        .await?;
+
+                        // Commit transaction
+                        query("COMMIT").execute(&mut db.conn).await?;
+
+                        Ok::<String, sqlx_d1::Error>(resolved_id)
                     })
                     .await
                     .map_err(AppError::from)?;
-            }
-
-            new_id
-        };
-
-        // Record the save
-        let save_id = Uuid::new_v4().to_string();
-        {
-            let save_id_q = save_id.clone();
-            let link_id_q = link_id.clone();
-            let user_id_q = user.id.clone();
-            let source_app_q = item.source_app.clone();
-            let shared_text_q = item.shared_text.clone();
-            let now_q = now_iso.clone();
-            handles
-                .db
-                .run(move |mut db| async move {
-                    query(
-                        r#"
-            INSERT INTO link_saves (
-                id, link_id, user_id, source_app, shared_text, shared_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            "#,
-                    )
-                    .bind(&save_id_q)
-                    .bind(&link_id_q)
-                    .bind(&user_id_q)
-                    .bind(&source_app_q)
-                    .bind(&shared_text_q)
-                    .bind::<Option<String>>(None)
-                    .bind(&now_q)
-                    .execute(&mut db.conn)
-                    .await
-                })
-                .await
-                .map_err(AppError::from)?;
-        }
 
         // Trigger background processing immediately (fire-and-forget)
         {

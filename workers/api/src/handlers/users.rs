@@ -314,6 +314,7 @@ pub async fn get_user_tokens(
             })
             .await?;
 
+    // Using INTEGER timestamps (milliseconds) across auth_tokens and responses
     let now = datetime_to_timestamp(Utc::now());
     let results = {
         let user_id_q = user.id.clone();
