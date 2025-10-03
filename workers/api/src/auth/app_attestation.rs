@@ -19,10 +19,20 @@ use p256::{
 };
 use sha2::{Digest, Sha256};
 
-// Apple App Attestation AAGUID (production: "appattest" + 7 zero bytes)
-const APPLE_APP_ATTEST_AAGUID: &[u8] = &[
+// Apple App Attestation AAGUIDs
+// Production: "appattest" + 7 zero bytes
+const APPLE_APP_ATTEST_AAGUID_PRODUCTION: &[u8] = &[
     0x61, 0x70, 0x70, 0x61, 0x74, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
+
+// Development/Simulator: "appattestdevelop" (16 bytes)
+const APPLE_APP_ATTEST_AAGUID_DEVELOPMENT: &[u8] = &[
+    0x61, 0x70, 0x70, 0x61, 0x74, 0x74, 0x65, 0x73, 0x74, 0x64, 0x65, 0x76, 0x65, 0x6C, 0x6F, 0x70,
+];
+
+fn is_valid_app_attest_aaguid(aaguid: &[u8; 16]) -> bool {
+    aaguid == APPLE_APP_ATTEST_AAGUID_PRODUCTION || aaguid == APPLE_APP_ATTEST_AAGUID_DEVELOPMENT
+}
 
 #[derive(Debug)]
 struct AttestationStatement {
@@ -292,9 +302,16 @@ pub fn perform_attestation_validation(
         .ok_or("Missing attested credential data")?;
 
     console_log!("[Debug] Received AAGUID: {:?}", credential_data.aaguid);
-    console_log!("[Debug] Expected AAGUID: {:?}", APPLE_APP_ATTEST_AAGUID);
+    console_log!(
+        "[Debug] Production AAGUID: {:?}",
+        APPLE_APP_ATTEST_AAGUID_PRODUCTION
+    );
+    console_log!(
+        "[Debug] Development AAGUID: {:?}",
+        APPLE_APP_ATTEST_AAGUID_DEVELOPMENT
+    );
 
-    if credential_data.aaguid != APPLE_APP_ATTEST_AAGUID {
+    if !is_valid_app_attest_aaguid(&credential_data.aaguid) {
         // Log the actual AAGUID for debugging
         let received_hex = credential_data
             .aaguid
@@ -302,19 +319,25 @@ pub fn perform_attestation_validation(
             .map(|b| format!("{:02X}", b))
             .collect::<Vec<_>>()
             .join("");
-        let expected_hex = APPLE_APP_ATTEST_AAGUID
+        let prod_hex = APPLE_APP_ATTEST_AAGUID_PRODUCTION
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join("");
+        let dev_hex = APPLE_APP_ATTEST_AAGUID_DEVELOPMENT
             .iter()
             .map(|b| format!("{:02X}", b))
             .collect::<Vec<_>>()
             .join("");
         console_log!(
-            "[Debug] AAGUID mismatch - Received: {}, Expected: {}",
+            "[Debug] AAGUID mismatch - Received: {}, Expected production: {} or development: {}",
             received_hex,
-            expected_hex
+            prod_hex,
+            dev_hex
         );
         return Err(format!(
-            "Invalid AAGUID - received: {}, expected: {}",
-            received_hex, expected_hex
+            "Invalid AAGUID - received: {}, expected production: {} or development: {}",
+            received_hex, prod_hex, dev_hex
         ));
     }
 
