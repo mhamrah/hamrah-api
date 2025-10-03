@@ -1079,3 +1079,65 @@ pub async fn validate_access_token_endpoint(
 
     Err(Box::new(AppError::unauthorized("Unauthorized")))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyKeyRequest {
+    #[serde(rename = "keyId")]
+    pub key_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyKeyResponse {
+    pub valid: bool,
+}
+
+/// Verify if an App Attestation key exists
+pub async fn app_attestation_verify_key(
+    axum::extract::Extension(handles): axum::extract::Extension<
+        crate::shared_handles::SharedHandles,
+    >,
+    headers: HeaderMap,
+    JsonExtractor(request): JsonExtractor<VerifyKeyRequest>,
+) -> AppResult<Json<VerifyKeyResponse>> {
+    // Validate Bearer token
+    if let Some(auth_header) = headers.get("authorization").and_then(|h| h.to_str().ok()) {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            let token_owned = token.to_string();
+            match handles
+                .db
+                .run(move |mut db| async move {
+                    tokens::validate_access_token(&mut db, &token_owned).await
+                })
+                .await
+            {
+                Ok(Some(_auth_token)) => {
+                    // Token is valid, check if key exists
+                    use sqlx_d1::query;
+                    let key_id_q = request.key_id.clone();
+                    let result = handles
+                        .db
+                        .run(move |mut db| async move {
+                            query("SELECT 1 FROM app_attest_keys WHERE key_id = ? LIMIT 1")
+                                .bind(&key_id_q)
+                                .fetch_optional(&mut db.conn)
+                                .await
+                        })
+                        .await
+                        .map_err(AppError::from)?;
+
+                    return Ok(Json(VerifyKeyResponse {
+                        valid: result.is_some(),
+                    }));
+                }
+                Ok(None) => {
+                    return Err(Box::new(AppError::unauthorized("Unauthorized")));
+                }
+                Err(e) => {
+                    return Err(Box::new(AppError::from(e)));
+                }
+            }
+        }
+    }
+
+    Err(Box::new(AppError::unauthorized("Unauthorized")))
+}

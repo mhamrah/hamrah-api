@@ -136,6 +136,10 @@ pub fn app_router() -> Router<()> {
             post(handlers::auth::app_attestation_verify),
         )
         .route(
+            "/api/app-attestation/verify-key",
+            post(handlers::auth::app_attestation_verify_key),
+        )
+        .route(
             "/api/auth/sessions/validate",
             get(handlers::auth::validate_session),
         )
