@@ -215,26 +215,23 @@ fn extract_p256_public_key_from_cose(cose_key: &[u8]) -> Result<Vec<u8>, String>
     let mut y_coord = None;
 
     for (key, value) in map {
-        match key {
-            ciborium::Value::Integer(i) => {
-                let i_val: i128 = i.into();
-                match i_val {
-                    -2 => {
-                        // x coordinate
-                        if let ciborium::Value::Bytes(x) = value {
-                            x_coord = Some(x);
-                        }
+        if let ciborium::Value::Integer(i) = key {
+            let i_val: i128 = i.into();
+            match i_val {
+                -2 => {
+                    // x coordinate
+                    if let ciborium::Value::Bytes(x) = value {
+                        x_coord = Some(x);
                     }
-                    -3 => {
-                        // y coordinate
-                        if let ciborium::Value::Bytes(y) = value {
-                            y_coord = Some(y);
-                        }
-                    }
-                    _ => {}
                 }
+                -3 => {
+                    // y coordinate
+                    if let ciborium::Value::Bytes(y) = value {
+                        y_coord = Some(y);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
