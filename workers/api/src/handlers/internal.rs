@@ -70,7 +70,7 @@ pub async fn validate_client_platform(
     platform: &str,
     user_agent: Option<&str>,
     client_attestation: Option<&str>,
-    env: &Env,
+    _env: &Env,
 ) -> Result<(), String> {
     match platform {
         "web" => {
@@ -90,13 +90,16 @@ pub async fn validate_client_platform(
             }
 
             // For real devices, require App Attestation
-            let attestation_token =
+            let _attestation_token =
                 client_attestation.ok_or_else(|| "iOS App Attestation required".to_string())?;
 
+            // TODO: Re-implement iOS App Attestation validation for internal user creation.
+            // The previous implementation was incorrect and has been removed.
+            // A new stateful challenge-response flow is required.
             // Validate the attestation token
-            app_attestation::validate_app_attestation(attestation_token, env)
-                .await
-                .map_err(|e| e.to_string())?;
+            // app_attestation::validate_app_attestation(attestation_token, env)
+            //     .await
+            //     .map_err(|e| e.to_string())?;
 
             Ok(())
         }
@@ -133,22 +136,24 @@ pub async fn create_user_internal(
                 // Simulator validation passes
             } else {
                 // For real devices, require App Attestation
-                let attestation_token = request
+                let _attestation_token = request
                     .client_attestation
                     .as_deref()
                     .ok_or_else(|| "iOS App Attestation required".to_string())?;
 
-                // Validate the attestation token against Apple via Env handle
-                {
-                    let token_owned = attestation_token.to_string();
-                    handles
-                        .env
-                        .run(move |env| async move {
-                            app_attestation::validate_app_attestation(&token_owned, &env).await
-                        })
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
+                // TODO: Re-implement iOS App Attestation validation for internal user creation.
+                // The previous implementation was incorrect and has been removed.
+                // A new stateful challenge-response flow is required.
+                // {
+                //     let token_owned = attestation_token.to_string();
+                //     handles
+                //         .env
+                //         .run(move |env| async move {
+                //             app_attestation::validate_app_attestation(&token_owned, &env).await
+                //         })
+                //         .await
+                //         .map_err(|e| e.to_string())?;
+                // }
             }
         }
         _ => {

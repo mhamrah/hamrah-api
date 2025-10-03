@@ -620,9 +620,14 @@ pub async fn app_attestation_verify(
     };
 
     // 2. Get Team ID from environment
-    let team_id = match handles.env.var("APPLE_TEAM_ID") {
-        Ok(v) => v.to_string(),
-        Err(_) => {
+    let team_id_res = handles
+        .env
+        .run(|env| async move { env.var("APPLE_TEAM_ID").map(|secret| secret.to_string()) })
+        .await;
+
+    let team_id = match team_id_res {
+        Ok(id) => id,
+        _ => {
             console_log!("❌ APPLE_TEAM_ID environment variable not set");
             return Err(AppError::internal("Server configuration error").into());
         }
@@ -698,6 +703,7 @@ pub async fn app_attestation_verify(
     }
 }
 
+#[allow(dead_code)]
 fn extract_uncompressed_p256_pubkey_from_attestation_b64(attestation_b64: &str) -> Option<String> {
     // Decode base64 attestationObject (CBOR map with "authData")
     use base64::Engine;
@@ -715,6 +721,7 @@ fn extract_uncompressed_p256_pubkey_from_attestation_b64(attestation_b64: &str) 
 
 // Find the CBOR byte string value that follows a given text key in a top-level CBOR map.
 // This is a very narrow parser tailored for finding the "authData" entry in an attestationObject.
+#[allow(dead_code)]
 fn cbor_find_bytes_after_text_key(data: &[u8], key: &str) -> Option<Vec<u8>> {
     let key_bytes = key.as_bytes();
     if key_bytes.len() > 23 {
@@ -764,6 +771,7 @@ fn cbor_find_bytes_after_text_key(data: &[u8], key: &str) -> Option<Vec<u8>> {
 
 // Parse WebAuthn-style authData for attested credential public key COSE_Key,
 // and extract X and Y (each 32 bytes) from COSE EC2 key (-2: x, -3: y).
+#[allow(dead_code)]
 fn parse_pubkey_from_auth_data(auth: &[u8]) -> Option<Vec<u8>> {
     // authData: rpIdHash(32) | flags(1) | signCount(4) | [attestedCredentialData if AT flag]
     if auth.len() < 37 {
