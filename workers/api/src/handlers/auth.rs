@@ -556,7 +556,9 @@ pub async fn app_attestation_verify(
     // Check if this is a simulator request
     // Note: This is a basic check. A more robust solution might involve a header.
     if request.key_id.contains("simulator") || request.bundle_id.contains("simulator") {
-        console_log!("[/api/app-attestation/verify] Detected simulator request, bypassing validation.");
+        console_log!(
+            "[/api/app-attestation/verify] Detected simulator request, bypassing validation."
+        );
         return Ok(Json(AttestationVerifyResponse {
             success: true,
             error: None,
@@ -684,7 +686,10 @@ pub async fn app_attestation_verify(
             }))
         }
         Err(err) => {
-            console_log!("❌ [/api/app-attestation/verify] Local validation failed: {}", err);
+            console_log!(
+                "❌ [/api/app-attestation/verify] Local validation failed: {}",
+                err
+            );
             Ok(Json(AttestationVerifyResponse {
                 success: false,
                 error: Some(format!("Attestation validation failed: {}", err)),
