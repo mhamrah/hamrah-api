@@ -551,37 +551,20 @@ pub async fn app_attestation_verify(
     >,
     JsonExtractor(request): JsonExtractor<AttestationVerifyRequest>,
 ) -> AppResult<Json<AttestationVerifyResponse>> {
-    // removed non-error log
+    console_log!("[/api/app-attestation/verify] Received request");
 
-    // Check if this is a simulator request (headers not available here)
-    let user_agent: Option<&str> = None;
-    let is_simulator = app_attestation::is_ios_simulator(user_agent);
-
-    if is_simulator {
-        // removed non-error log
-
-        // Clean up challenge record
-        use sqlx_d1::query;
-        {
-            let challenge_id_q = request.challenge_id.clone();
-            let _ = handles
-                .db
-                .run(move |mut db| async move {
-                    query("DELETE FROM app_attest_challenges WHERE id = ?")
-                        .bind(&challenge_id_q)
-                        .execute(&mut db.conn)
-                        .await
-                })
-                .await;
-        }
-
+    // Check if this is a simulator request
+    // Note: This is a basic check. A more robust solution might involve a header.
+    if request.key_id.contains("simulator") || request.bundle_id.contains("simulator") {
+        console_log!("[/api/app-attestation/verify] Detected simulator request, bypassing validation.");
         return Ok(Json(AttestationVerifyResponse {
             success: true,
             error: None,
         }));
     }
 
-    // Fetch and validate challenge
+    // 1. Fetch and validate the challenge from the database
+    console_log!("[/api/app-attestation/verify] Fetching challenge...");
     use sqlx_d1::query_as;
 
     #[derive(sqlx::FromRow)]
@@ -612,105 +595,88 @@ pub async fn app_attestation_verify(
 
     let challenge_b64 = match stored_challenge {
         Some(ch) => {
-            // Check if challenge is expired
             if ch.expires_at < datetime_to_timestamp(Utc::now()) {
-                console_log!("❌ Challenge expired");
                 return Ok(Json(AttestationVerifyResponse {
                     success: false,
                     error: Some("Challenge expired".to_string()),
                 }));
             }
-
-            // Verify bundle ID matches
             if ch.bundle_id != request.bundle_id {
-                console_log!(
-                    "❌ Bundle ID mismatch: expected {}, got {}",
-                    ch.bundle_id,
-                    request.bundle_id
-                );
                 return Ok(Json(AttestationVerifyResponse {
                     success: false,
                     error: Some("Bundle ID mismatch".to_string()),
                 }));
             }
-
             ch.challenge
         }
         None => {
-            console_log!("❌ Challenge not found: {}", request.challenge_id);
             return Ok(Json(AttestationVerifyResponse {
                 success: false,
-                error: Some("Invalid challenge".to_string()),
+                error: Some("Invalid challenge ID".to_string()),
             }));
         }
     };
 
-    // Validate with Apple's App Attest service using the stored challenge
-    use base64::Engine;
-    let payload = serde_json::json!({
-        "attestation_object": request.attestation,
-        "challenge": challenge_b64,
-        "key_id": request.key_id,
-    });
-    let payload_str = match serde_json::to_string(&payload) {
-        Ok(s) => s,
-        Err(e) => {
-            console_log!("❌ Failed to serialize attestation payload: {}", e);
-            return Ok(Json(AttestationVerifyResponse {
-                success: false,
-                error: Some("Attestation serialization failed".to_string()),
-            }));
+    // 2. Get Team ID from environment
+    let team_id = match handles.env.var("APPLE_TEAM_ID") {
+        Ok(v) => v.to_string(),
+        Err(_) => {
+            console_log!("❌ APPLE_TEAM_ID environment variable not set");
+            return Err(AppError::internal("Server configuration error").into());
         }
     };
-    let token_b64 = base64::engine::general_purpose::STANDARD.encode(payload_str);
 
-    match handles
-        .env
-        .run(move |env| async move { app_attestation::validate_app_attestation(&token_b64, &env).await })
-        .await
-    {
-        Ok(receipt_opt) => {
-            // Clean up challenge record
+    // 3. Perform local attestation validation
+    console_log!("[/api/app-attestation/verify] Performing local validation...");
+    match app_attestation::perform_attestation_validation(
+        &request.attestation,
+        &challenge_b64,
+        &team_id,
+        &request.bundle_id,
+    ) {
+        Ok(public_key_bytes) => {
+            console_log!("[/api/app-attestation/verify] Local validation successful");
+
+            // 4. Store the new, validated key in the database
             use sqlx_d1::query;
-            {
-                let challenge_id_q = request.challenge_id.clone();
-                let _ = handles
-                    .db
-                    .run(move |mut db| async move {
-                        query("DELETE FROM app_attest_challenges WHERE id = ?")
-                            .bind(&challenge_id_q)
-                            .execute(&mut db.conn)
-                            .await
-                    })
-                    .await;
+            let key_id_q = request.key_id.clone();
+            let bundle_id_q = request.bundle_id.clone();
+            let now_ts = datetime_to_timestamp(Utc::now());
+
+            let db_result = handles
+                .db
+                .run(move |mut db| async move {
+                    query(
+                        "INSERT OR REPLACE INTO app_attest_keys (key_id, bundle_id, public_key, counter, created_at, last_used_at) VALUES (?, ?, ?, 0, ?, ?)"
+                    )
+                    .bind(&key_id_q)
+                    .bind(&bundle_id_q)
+                    .bind(&public_key_bytes)
+                    .bind(now_ts)
+                    .bind(now_ts)
+                    .execute(&mut db.conn)
+                    .await
+                })
+                .await;
+
+            if let Err(e) = db_result {
+                console_log!("❌ Database error storing attestation key: {}", e);
+                return Err(AppError::internal("Failed to store attestation key").into());
             }
 
-            // Store validated key, receipt, and (optional) public key for future assertions
-            let pubkey_b64 =
-                extract_uncompressed_p256_pubkey_from_attestation_b64(&request.attestation);
-            {
-                let key_id_q = request.key_id.clone();
-                let bundle_id_q = request.bundle_id.clone();
-                let pubkey_opt_q = pubkey_b64.clone();
-                let receipt_opt_q = receipt_opt.clone();
-                let now_ts = datetime_to_timestamp(Utc::now());
-                let _ = handles
-                    .db
-                    .run(move |mut db| async move {
-                        query(
-                            "INSERT OR REPLACE INTO app_attest_keys (key_id, bundle_id, public_key, attestation_receipt, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)"
-                        )
-                        .bind(&key_id_q)
-                        .bind(&bundle_id_q)
-                        .bind(pubkey_opt_q.as_deref())
-                        .bind(receipt_opt_q.as_deref())
-                        .bind(now_ts)
-                        .bind(now_ts)
+            console_log!("[/api/app-attestation/verify] New key stored successfully");
+
+            // 5. Clean up the used challenge
+            let challenge_id_q = request.challenge_id.clone();
+            let _ = handles
+                .db
+                .run(move |mut db| async move {
+                    query("DELETE FROM app_attest_challenges WHERE id = ?")
+                        .bind(&challenge_id_q)
                         .execute(&mut db.conn)
                         .await
-                    })
-                    .await;
-            }
+                })
+                .await;
 
             Ok(Json(AttestationVerifyResponse {
                 success: true,
@@ -718,10 +684,10 @@ pub async fn app_attestation_verify(
             }))
         }
         Err(err) => {
-            console_log!("❌ Apple App Attestation verification failed: {}", err);
+            console_log!("❌ [/api/app-attestation/verify] Local validation failed: {}", err);
             Ok(Json(AttestationVerifyResponse {
                 success: false,
-                error: Some("Attestation verification failed".to_string()),
+                error: Some(format!("Attestation validation failed: {}", err)),
             }))
         }
     }

@@ -56,6 +56,8 @@ url = "2.5.7"
 serde_urlencoded = "0.7.1"
 ciborium = "0.2"
 wasm-bindgen-futures = "0.4"
+appattest-rs = "0.2.0"
+pem = "3.0.4"
 # WebAuthn-rs removed - WebAuthn protocol handled in web layer only
 
 [dev-dependencies]
