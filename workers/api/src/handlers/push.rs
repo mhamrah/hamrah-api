@@ -48,8 +48,8 @@ pub async fn post_push_register(
     let now = datetime_to_timestamp(Utc::now());
 
     // Check if token already exists for this user/platform combination
-    let user_id_q = user.id.clone();
-    let platform_q = req.platform.clone();
+    let _user_id_q = user.id.clone();
+    let _platform_q = req.platform.clone();
     let device_token_q = req.device_token.clone();
     let existing = handles
         .db
@@ -64,7 +64,7 @@ pub async fn post_push_register(
 
     if existing.is_some() {
         // Token already exists, update last_seen
-        let now_q = now.clone();
+        let now_q = now;
         let user_id_q2 = user.id.clone();
         let platform_q2 = req.platform.clone();
         let device_token_q2 = req.device_token.clone();
@@ -76,7 +76,7 @@ pub async fn post_push_register(
                 )
                 .bind(&user_id_q2)
                 .bind(&platform_q2)
-                .bind(&now_q)
+                .bind(now_q)
                 .bind(&device_token_q2)
                 .execute(&mut db.conn)
                 .await
@@ -96,7 +96,7 @@ pub async fn post_push_register(
     let user_id_q3 = user.id.clone();
     let device_token_q3 = req.device_token.clone();
     let platform_q3 = req.platform.clone();
-    let now_q = now.clone();
+    let now_q = now;
     handles
         .db
         .run(move |mut db| async move {
@@ -114,8 +114,8 @@ pub async fn post_push_register(
             .bind(&user_id_q3)
             .bind(&device_token_q3)
             .bind(&platform_q3)
-            .bind(&now_q)
-            .bind(&now_q)
+            .bind(now_q)
+            .bind(now_q)
             .execute(&mut db.conn)
             .await
         })

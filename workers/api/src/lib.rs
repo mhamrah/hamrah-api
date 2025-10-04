@@ -49,7 +49,7 @@ pub mod utils;
 
 use axum::{
     http::HeaderValue,
-    routing::{delete, get, patch, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use db::{

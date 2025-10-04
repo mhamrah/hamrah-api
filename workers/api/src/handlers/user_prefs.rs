@@ -130,7 +130,7 @@ pub async fn put_user_prefs(
         let preferred_q = req.preferred_models.clone();
         let summary_q = req.summary_models.clone();
         let override_q = req.summary_prompt_override.clone();
-        let now_q = now.clone();
+        let now_q = now;
         handles
             .db
             .run(move |mut db| async move {
@@ -144,7 +144,7 @@ pub async fn put_user_prefs(
                 .bind(&preferred_q)
                 .bind(&summary_q)
                 .bind(&override_q)
-                .bind(&now_q)
+                .bind(now_q)
                 .bind(&user_id_q2)
                 .execute(&mut db.conn)
                 .await
@@ -157,7 +157,7 @@ pub async fn put_user_prefs(
         let preferred_q = req.preferred_models.clone();
         let summary_q = req.summary_models.clone();
         let override_q = req.summary_prompt_override.clone();
-        let now_q = now.clone();
+        let now_q = now;
         handles
             .db
             .run(move |mut db| async move {
@@ -171,8 +171,8 @@ pub async fn put_user_prefs(
                 .bind(&preferred_q)
                 .bind(&summary_q)
                 .bind(&override_q)
-                .bind(&now_q)
-                .bind(&now_q)
+                .bind(now_q)
+                .bind(now_q)
                 .execute(&mut db.conn)
                 .await
             })

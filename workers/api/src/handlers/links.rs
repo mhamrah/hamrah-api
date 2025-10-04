@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::handlers::common::{LinkCompactItem, PostLinkItem, PostLinksBody};
+use crate::handlers::common::{PostLinkItem, PostLinksBody};
 use crate::handlers::users::get_current_user_from_request;
 use crate::shared_handles::SharedHandles;
 use crate::utils::{url_canonicalize, url_is_valid_public_http};
