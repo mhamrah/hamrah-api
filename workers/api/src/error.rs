@@ -1,4 +1,15 @@
 use axum::http::{header::RETRY_AFTER, HeaderMap, HeaderName, HeaderValue, StatusCode};
+
+#[macro_export]
+macro_rules! log_error {
+    ($err:expr, $context:expr) => {
+        worker::console_log!(
+            "{{\"level\": \"error\", \"context\": \"{}\", \"error\": \"{}\"}}",
+            $context,
+            $err
+        );
+    };
+}
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Serialize;
@@ -168,8 +179,6 @@ impl AppError {
 
     /// 500 Internal Server Error with a generic message, suitable for unexpected errors.
     pub fn anyhow<E: Display>(err: E) -> Self {
-        // Log line for operators; callers can add more context where needed.
-        worker::console_log!("Internal error: {}", err);
         Self::internal("An unexpected error occurred")
             .with_details(json!({ "reason": err.to_string() }))
     }
@@ -197,6 +206,7 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        log_error!(&self.message, &self.code);
         let headers = self.headers;
         // Compose JSON error body
         let body = json!({
