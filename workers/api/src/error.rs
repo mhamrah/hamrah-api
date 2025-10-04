@@ -3,11 +3,21 @@ use axum::http::{header::RETRY_AFTER, HeaderMap, HeaderName, HeaderValue, Status
 #[macro_export]
 macro_rules! log_error {
     ($err:expr, $context:expr) => {
-        worker::console_log!(
-            "{{\"level\": \"error\", \"context\": \"{}\", \"error\": \"{}\"}}",
-            $context,
-            $err
-        );
+        #[cfg(target_arch = "wasm32")]
+        {
+            worker::console_log!(
+                "{{\"level\": \"error\", \"context\": \"{}\", \"error\": \"{}\"}}",
+                $context,
+                $err
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            eprintln!(
+                "{{\"level\": \"error\", \"context\": \"{}\", \"error\": \"{}\"}}",
+                $context, $err
+            );
+        }
     };
 }
 use axum::response::{IntoResponse, Response};
