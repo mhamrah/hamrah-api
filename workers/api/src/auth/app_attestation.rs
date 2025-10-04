@@ -268,8 +268,6 @@ pub fn perform_attestation_validation(
     team_id: &str,
     bundle_id: &str,
 ) -> Result<Vec<u8>, String> {
-    console_log!("[Debug] perform_attestation_validation: starting (WASM-compatible)");
-
     // Decode attestation object
     let attestation_bytes = BASE64_STANDARD
         .decode(attestation_b64)
@@ -281,7 +279,6 @@ pub fn perform_attestation_validation(
         .map_err(|e| format!("Failed to decode challenge: {}", e))?;
 
     let app_id = format!("{}.{}", team_id, bundle_id);
-    console_log!("[Debug] App ID for validation: {}", app_id);
 
     // Parse attestation object
     let attestation_obj = parse_attestation_object(&attestation_bytes)?;
@@ -301,16 +298,6 @@ pub fn perform_attestation_validation(
         .as_ref()
         .ok_or("Missing attested credential data")?;
 
-    console_log!("[Debug] Received AAGUID: {:?}", credential_data.aaguid);
-    console_log!(
-        "[Debug] Production AAGUID: {:?}",
-        APPLE_APP_ATTEST_AAGUID_PRODUCTION
-    );
-    console_log!(
-        "[Debug] Development AAGUID: {:?}",
-        APPLE_APP_ATTEST_AAGUID_DEVELOPMENT
-    );
-
     if !is_valid_app_attest_aaguid(&credential_data.aaguid) {
         // Log the actual AAGUID for debugging
         let received_hex = credential_data
@@ -329,12 +316,7 @@ pub fn perform_attestation_validation(
             .map(|b| format!("{:02X}", b))
             .collect::<Vec<_>>()
             .join("");
-        console_log!(
-            "[Debug] AAGUID mismatch - Received: {}, Expected production: {} or development: {}",
-            received_hex,
-            prod_hex,
-            dev_hex
-        );
+
         return Err(format!(
             "Invalid AAGUID - received: {}, expected production: {} or development: {}",
             received_hex, prod_hex, dev_hex
@@ -353,7 +335,6 @@ pub fn perform_attestation_validation(
 
     // For full validation, we would verify the certificate chain here
     // For now, we'll skip certificate validation in WASM environment
-    console_log!("[Debug] Basic attestation validation successful");
 
     Ok(public_key_bytes)
 }
@@ -366,8 +347,6 @@ pub fn perform_attestation_validation_native(
     team_id: &str,
     bundle_id: &str,
 ) -> Result<Vec<u8>, String> {
-    console_log!("[Debug] perform_attestation_validation: starting (native with appattest-rs)");
-
     let challenge_bytes = BASE64_STANDARD
         .decode(challenge_b64)
         .map_err(|e| format!("Failed to decode challenge: {}", e))?;
@@ -375,7 +354,6 @@ pub fn perform_attestation_validation_native(
         .map_err(|e| format!("Challenge is not valid UTF-8: {}", e))?;
 
     let app_id = format!("{}.{}", team_id, bundle_id);
-    console_log!("[Debug] App ID for validation: {}", app_id);
 
     // Create attestation from base64
     let attestation = Attestation::from_base64(attestation_b64)
@@ -387,10 +365,7 @@ pub fn perform_attestation_validation_native(
     let result = attestation.verify(challenge_str, &app_id, key_id);
 
     match result {
-        Ok((public_key, _receipt)) => {
-            console_log!("[Debug] appattest-rs validation successful");
-            Ok(public_key)
-        }
+        Ok((public_key, _receipt)) => Ok(public_key),
         Err(e) => {
             console_log!("[Error] appattest-rs validation failed: {:?}", e);
             Err(format!("App Attestation validation failed: {:?}", e))
@@ -506,9 +481,6 @@ pub async fn enforce_request_attestation_from_headers(
 
     let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
     if dev_bypass && is_ios_simulator(user_agent) {
-        console_log!(
-            "[Debug] enforce_request_attestation_from_headers: dev/simulator bypass accepted"
-        );
         return Ok(());
     }
 
@@ -545,9 +517,6 @@ pub async fn enforce_request_attestation_from_headers(
     let (public_key_bytes, db_counter) = match row {
         Some(r) => r,
         None => {
-            console_log!(
-                "[Debug] enforce_request_attestation_from_headers: key_id not found in database"
-            );
             return Err("Unknown App Attest key id or bundle ID mismatch".to_string());
         }
     };
@@ -568,7 +537,6 @@ pub async fn enforce_request_attestation_from_headers(
 
     let new_counter = match verification_result {
         Ok(()) => {
-            console_log!("[Debug] Assertion validation successful");
             // Since the verification succeeded, increment the counter
             (db_counter + 1) as u32
         }
