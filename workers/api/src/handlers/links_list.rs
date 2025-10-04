@@ -1,4 +1,4 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::handlers::common::LinkCompactItem;
 use crate::handlers::users::get_current_user_from_request;
 use crate::shared_handles::SharedHandles;
