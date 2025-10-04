@@ -180,7 +180,7 @@ jobs:
         run: cd workers/api && cargo clippy -- -D warnings
 
       - name: Run tests
-        run: cd workers/api && cargo test --verbose
+        run: cd workers/api && cargo test --release --verbose
 
       - name: Upload API build artifacts
         uses: actions/upload-artifact@v4

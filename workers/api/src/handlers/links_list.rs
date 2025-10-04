@@ -17,10 +17,6 @@ pub async fn get_links(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> AppResult<(StatusCode, HeaderMap, Json<serde_json::Value>)> {
-    worker::console_log!("🔍 DEBUG: Starting get_links handler");
-
-    let start_time = std::time::Instant::now();
-    worker::console_log!("🔍 DEBUG: Processing headers...");
     let header_pairs: Vec<(String, String)> = headers
         .iter()
         .filter_map(|(k, v)| {
@@ -30,13 +26,9 @@ pub async fn get_links(
         })
         .collect();
 
-    worker::console_log!("🔍 DEBUG: Starting user authentication...");
-    let auth_start = std::time::Instant::now();
-
     let user = handles
         .db
         .run(move |mut db| async move {
-            worker::console_log!("🔍 DEBUG: Inside DB executor for auth");
             let mut hdrs = HeaderMap::new();
             for (k, v) in header_pairs {
                 if let (Ok(name), Ok(value)) = (
@@ -46,19 +38,10 @@ pub async fn get_links(
                     hdrs.insert(name, value);
                 }
             }
-            worker::console_log!("🔍 DEBUG: About to call get_current_user_from_request");
-            let result = get_current_user_from_request(&mut db, &hdrs).await;
-            worker::console_log!("🔍 DEBUG: get_current_user_from_request completed");
-            result
+            get_current_user_from_request(&mut db, &hdrs).await
         })
         .await?;
 
-    worker::console_log!(
-        "🔍 DEBUG: User authentication completed in {:?}",
-        auth_start.elapsed()
-    );
-
-    worker::console_log!("🔍 DEBUG: Parsing query parameters...");
     let limit = params
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
@@ -70,12 +53,6 @@ pub async fn get_links(
         .get("since")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0);
-
-    worker::console_log!(
-        "🔍 DEBUG: Query params - limit: {}, since(ms): {}",
-        limit,
-        since
-    );
 
     #[derive(sqlx::FromRow, Debug)]
     struct DeltaRow {
@@ -104,14 +81,10 @@ pub async fn get_links(
     let since_q: i64 = since;
     let limit_q = limit;
 
-    worker::console_log!("🔍 DEBUG: Starting main links query for user: {}", user.id);
-    let query_start = std::time::Instant::now();
-
     // Query 1: Get the links
     let rows = handles
         .db
         .run(move |mut db| async move {
-            worker::console_log!("🔍 DEBUG: Inside DB executor for links query");
             query_as::<DeltaRow>(
                 r#"
         SELECT
@@ -142,23 +115,13 @@ pub async fn get_links(
         })
         .await
         .map_err(|e| {
-            worker::console_log!("🔍 DEBUG: Links query failed: {}", e);
-            format!("Database error: {}", e)
+            AppError::internal(format!("Database error: {}", e))
         })?;
 
-    worker::console_log!(
-        "🔍 DEBUG: Main links query completed in {:?}, found {} rows",
-        query_start.elapsed(),
-        rows.len()
-    );
-
     // Query 2: Get all tags for these links in one batch
-    worker::console_log!("🔍 DEBUG: Starting tags query...");
-    let tags_start = std::time::Instant::now();
     let mut tags_map: HashMap<String, Vec<String>> = HashMap::new();
 
     if !rows.is_empty() {
-        worker::console_log!("🔍 DEBUG: Preparing tags query for {} links", rows.len());
         let link_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
         let placeholders = link_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
@@ -176,44 +139,26 @@ pub async fn get_links(
         let tag_rows = handles
             .db
             .run(move |mut db| async move {
-                worker::console_log!("🔍 DEBUG: Inside DB executor for tags query");
                 let mut q = query_as::<LinkTagRow>(&tag_query);
                 for link_id in link_ids {
                     q = q.bind(link_id);
                 }
-                worker::console_log!("🔍 DEBUG: About to execute tags query");
                 let result = q.fetch_all(&mut db.conn).await;
-                worker::console_log!("🔍 DEBUG: Tags query executed");
                 result
             })
             .await
-            .map_err(|e| {
-                worker::console_log!("🔍 DEBUG: Tags query failed: {}", e);
-                format!("Database error fetching tags: {}", e)
-            })?;
-
-        worker::console_log!(
-            "🔍 DEBUG: Tags query completed in {:?}, found {} tag rows",
-            tags_start.elapsed(),
-            tag_rows.len()
-        );
+            .map_err(|e| AppError::internal(format!("Database error fetching tags: {}", e)))?;
 
         // Group tags by link_id
-        worker::console_log!("🔍 DEBUG: Grouping tags by link_id...");
         for tag_row in tag_rows {
             tags_map
                 .entry(tag_row.link_id)
                 .or_default()
                 .push(tag_row.tag_name);
         }
-        worker::console_log!("🔍 DEBUG: Tags grouped for {} links", tags_map.len());
-    } else {
-        worker::console_log!("🔍 DEBUG: No links found, skipping tags query");
     }
 
     // Combine links with their tags
-    worker::console_log!("🔍 DEBUG: Building response JSON...");
-    let json_start = std::time::Instant::now();
     let mut out_links = Vec::with_capacity(rows.len());
     for row in &rows {
         let tags = tags_map.get(&row.id).cloned().unwrap_or_default();
@@ -235,11 +180,6 @@ pub async fn get_links(
         }));
     }
 
-    worker::console_log!(
-        "🔍 DEBUG: JSON building completed in {:?}",
-        json_start.elapsed()
-    );
-
     // next_cursor is an i64 (ms)
     let next_cursor: Option<i64> = if (rows.len() as i64) == limit {
         rows.last().map(|r| r.updated_at)
@@ -249,12 +189,6 @@ pub async fn get_links(
 
     let mut headers = HeaderMap::new();
     headers.insert("Cache-Control", "no-store".parse().unwrap());
-
-    worker::console_log!(
-        "🔍 DEBUG: get_links handler completed in {:?}, returning {} links",
-        start_time.elapsed(),
-        out_links.len()
-    );
 
     Ok((
         StatusCode::OK,
