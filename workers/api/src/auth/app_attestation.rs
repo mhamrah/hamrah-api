@@ -9,7 +9,7 @@ use axum::{middleware::Next, response::Response};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use chrono::Utc;
-use worker::{console_log, Env};
+use worker::console_log;
 
 // WASM-compatible crypto imports
 use ciborium;
@@ -268,6 +268,7 @@ pub fn perform_attestation_validation(
     team_id: &str,
     bundle_id: &str,
 ) -> Result<Vec<u8>, String> {
+    console_log!("performing attestation validation");
     // Decode attestation object
     let attestation_bytes = BASE64_STANDARD
         .decode(attestation_b64)
@@ -336,6 +337,7 @@ pub fn perform_attestation_validation(
     // For full validation, we would verify the certificate chain here
     // For now, we'll skip certificate validation in WASM environment
 
+    console_log!("returning okay");
     Ok(public_key_bytes)
 }
 
@@ -381,6 +383,7 @@ fn validate_assertion_wasm(
     app_id: &str,
     counter: u32,
 ) -> Result<(), String> {
+    console_log!("wasm");
     // Decode assertion
     let assertion_bytes = BASE64_STANDARD
         .decode(assertion_b64)
@@ -455,23 +458,25 @@ fn validate_assertion_wasm(
         .verify(&message_hash, &sig)
         .map_err(|e| format!("Signature verification failed: {}", e))?;
 
+    console_log!("assertion okay");
     Ok(())
 }
 
 /// Enforce iOS App Attestation headers for "sensitive" routes.
+#[derive(Clone)]
+pub struct AppAttestConfig {
+    dev_bypass: bool,
+    strict_verify: bool,
+    team_id: String,
+}
+
 pub async fn enforce_request_attestation_from_headers(
     headers: &HeaderMap,
     db: &mut Database,
-    env: &Env,
+    cfg: AppAttestConfig,
 ) -> Result<(), String> {
-    let dev_bypass = env
-        .var("APP_ATTEST_DEV_BYPASS")
-        .map(|v| v.to_string() == "1")
-        .unwrap_or(false);
-    let strict_verify = env
-        .var("APP_ATTEST_VERIFY_SIGNATURE_STRICT")
-        .map(|v| v.to_string() == "1")
-        .unwrap_or(false);
+    let dev_bypass = cfg.dev_bypass;
+    let strict_verify = cfg.strict_verify;
 
     console_log!(
         "[Debug] enforce_request_attestation_from_headers: starting with dev_bypass={}, strict_verify={}",
@@ -480,7 +485,9 @@ pub async fn enforce_request_attestation_from_headers(
     );
 
     let user_agent = headers.get("user-agent").and_then(|h| h.to_str().ok());
-    if dev_bypass && is_ios_simulator(user_agent) {
+    console_log!("[Debug] User-Agent: {:?}", user_agent);
+    if dev_bypass {
+        console_log!("[Debug] Dev bypass is enabled; skipping iOS App Attestation enforcement");
         return Ok(());
     }
 
@@ -521,10 +528,7 @@ pub async fn enforce_request_attestation_from_headers(
         }
     };
 
-    let team_id = env
-        .var("APPLE_TEAM_ID")
-        .map_err(|_| "APPLE_TEAM_ID not configured".to_string())?;
-    let app_id = format!("{}.{}", team_id, bundle_id);
+    let app_id = format!("{}.{}", cfg.team_id, bundle_id);
 
     // Use WASM-compatible assertion validation
     let verification_result = validate_assertion_wasm(
@@ -564,7 +568,13 @@ pub async fn enforce_request_attestation_from_headers(
 
 /// Axum middleware to enforce iOS App Attestation on protected routes.
 pub async fn require_ios_app_attestation(req: AxumRequest, next: Next) -> Response {
+    let path = req.uri().path().to_string();
+    console_log!(
+        "[Attestation] require_ios_app_attestation invoked for {}",
+        path
+    );
     if let Some(handles) = req.extensions().get::<SharedHandles>().cloned() {
+        // Snapshot headers to owned pairs
         let header_pairs: Vec<(String, String)> = req
             .headers()
             .iter()
@@ -575,32 +585,71 @@ pub async fn require_ios_app_attestation(req: AxumRequest, next: Next) -> Respon
             })
             .collect();
 
-        let result: Result<(), String> = handles
-            .db
-            .run(move |mut db| {
-                let env = handles.env.clone();
-                async move {
-                    let mut hdrs = HeaderMap::new();
-                    for (k, v) in header_pairs {
-                        if let (Ok(name), Ok(value)) = (
-                            axum::http::header::HeaderName::from_bytes(k.as_bytes()),
-                            HeaderValue::from_str(&v),
-                        ) {
-                            hdrs.insert(name, value);
-                        }
-                    }
-                    // Run the actual enforcement function inside the closure with access to `db` and `env`
-                    env.run(move |env| async move {
-                        enforce_request_attestation_from_headers(&hdrs, &mut db, &env).await
-                    })
-                    .await
-                }
+        // Rebuild HeaderMap once here (outside DB run)
+        let mut hdrs = HeaderMap::new();
+        for (k, v) in header_pairs {
+            if let (Ok(name), Ok(value)) = (
+                axum::http::header::HeaderName::from_bytes(k.as_bytes()),
+                HeaderValue::from_str(&v),
+            ) {
+                hdrs.insert(name, value);
+            }
+        }
+
+        // Prefetch environment config without nesting inside DB job
+        let cfg_result = handles
+            .env
+            .run(|env| async move {
+                let normalize = |s: String| {
+                    matches!(
+                        s.as_str(),
+                        "1" | "true" | "TRUE" | "True" | "yes" | "YES" | "on" | "ON"
+                    )
+                };
+                let dev_bypass = env
+                    .var("APP_ATTEST_DEV_BYPASS")
+                    .map(|v| normalize(v.to_string()))
+                    .unwrap_or(false);
+                let strict_verify = env
+                    .var("APP_ATTEST_VERIFY_SIGNATURE_STRICT")
+                    .map(|v| normalize(v.to_string()))
+                    .unwrap_or(false);
+                let team_id = env
+                    .var("APPLE_TEAM_ID")
+                    .map_err(|_| "APPLE_TEAM_ID not configured".to_string())?;
+                Ok::<AppAttestConfig, String>(AppAttestConfig {
+                    dev_bypass,
+                    strict_verify,
+                    team_id: team_id.to_string(),
+                })
             })
             .await;
 
+        // Execute DB-only enforcement to avoid deadlocks from nested runs
+        let result: Result<(), String> = match cfg_result {
+            Ok(cfg) => {
+                let cfg_clone = cfg.clone();
+                handles
+                    .db
+                    .run(move |mut db| async move {
+                        enforce_request_attestation_from_headers(&hdrs, &mut db, cfg_clone).await
+                    })
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+
         match result {
-            Ok(()) => next.run(req).await,
+            Ok(()) => {
+                console_log!("[Attestation] Passed for {}", path);
+                next.run(req).await
+            }
             Err(message) => {
+                console_log!(
+                    "[Attestation] Blocked (unauthorized) for {}: {}",
+                    path,
+                    message
+                );
                 let body = serde_json::json!({
                     "error": {
                         "code": "unauthorized",
@@ -622,6 +671,10 @@ pub async fn require_ios_app_attestation(req: AxumRequest, next: Next) -> Respon
             }
         }
     } else {
+        console_log!(
+            "[Attestation] SharedHandles missing; skipping enforcement for {}",
+            path
+        );
         next.run(req).await
     }
 }

@@ -10,7 +10,7 @@ main = "build/worker/shim.mjs"
 # - workers/api/wrangler.toml
 # - workers/link-pipeline/wrangler.toml
 # - workers/link-pipeline/vitest.config.ts (compatibilityDate)
-compatibility_date = "2025-09-15"
+compatibility_date = "2025-07-18"
 compatibility_flags = ["nodejs_compat"]
 
 [build]

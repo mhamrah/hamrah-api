@@ -4,7 +4,7 @@ name = "hamrah-link-pipeline"
 # - hamrah-link-pipeline-pr-<PR_NUMBER> (for pull_request runs)
 # - hamrah-link-pipeline-manual-<RUN_NUMBER> (for manual workflow_dispatch runs)
 main = "dist/index.js"
-compatibility_date = "2025-09-15"
+compatibility_date = "2025-07-18"
 compatibility_flags = ["nodejs_compat"]
 
 [build]

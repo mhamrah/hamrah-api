@@ -10,7 +10,7 @@ export default defineConfig({
         AI: 'TEST_AI',
         LINK_PIPELINE: 'TEST_WORKFLOW'
       },
-      compatibilityDate: '2025-09-15',
+      compatibilityDate: '2025-07-18',
       compatibilityFlags: ['nodejs_compat']
     },
     coverage: {
