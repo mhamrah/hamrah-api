@@ -22,7 +22,27 @@ use uuid::Uuid;
 /* LinkListItem moved to handlers::common::types */
 
 /// POST /v1/links - create or upsert links for current user
-// debug_handler removed to satisfy Handler trait bound
+///
+/// Contract:
+/// - Authentication: Authorization: Bearer <access_token>
+/// - Content-Type: application/json
+/// - App Attestation headers required (enforced by middleware):
+///   X-iOS-App-Attest-Key, X-iOS-App-Attest-Assertion, X-Request-Challenge, X-iOS-App-Bundle-ID
+///
+/// Request body (single link):
+/// {
+///   "url": "https://example.com/article",
+///   "client_id": "A1D520AA-F4C3-4946-9D38-F09BF9B2BB8A",
+///   "source_app": "ios_app",                 // optional
+///   "shared_text": "note from share sheet",  // optional
+///   "shared_at": "2025-10-04T14:37:39Z"      // optional, RFC3339/ISO-8601
+/// }
+///
+/// Response:
+/// {
+///   "id": "<server_link_id>",
+///   "canonical_url": "https://example.com/article"
+/// }
 pub async fn post_links(
     Extension(handles): Extension<SharedHandles>,
     headers: HeaderMap,
@@ -100,6 +120,11 @@ pub async fn post_links(
         let shared_text_q = item.shared_text.clone();
         let save_id = Uuid::new_v4().to_string();
         let now_q = now_ts;
+        let shared_at_q: Option<i64> = item
+            .shared_at
+            .as_ref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| crate::utils::datetime_to_timestamp(dt.with_timezone(&chrono::Utc)));
 
         let link_id: String = handles
                     .db
@@ -155,7 +180,7 @@ pub async fn post_links(
                         .bind(&user_id_q)
                         .bind(&source_app_q)
                         .bind(&shared_text_q)
-                        .bind(Option::<i64>::None)
+                        .bind(shared_at_q)
                         .bind(now_q)
                         .execute(&mut db.conn)
                         .await?;
@@ -189,10 +214,6 @@ pub async fn post_links(
         }));
     }
 
-    // Return single-link shape for single item to match client expectations
-    if results.len() == 1 {
-        Ok(Json(results.remove(0)))
-    } else {
-        Ok(Json(json!({ "results": results })))
-    }
+    // Always return single-link shape
+    Ok(Json(results.remove(0)))
 }

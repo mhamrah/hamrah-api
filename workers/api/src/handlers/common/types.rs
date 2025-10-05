@@ -4,19 +4,27 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct PostLinkItem {
     pub url: String,
-    #[serde(rename = "clientId")]
     pub client_id: Option<String>,
-    #[serde(rename = "sourceApp")]
     pub source_app: Option<String>,
-    #[serde(rename = "sharedText")]
     pub shared_text: Option<String>,
+    pub shared_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug)]
 pub enum PostLinksBody {
     Single(PostLinkItem),
     Batch { links: Vec<PostLinkItem> },
+}
+
+impl<'de> serde::Deserialize<'de> for PostLinksBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Strict single-link payload only; batch formats are no longer supported.
+        let item = PostLinkItem::deserialize(deserializer)?;
+        Ok(PostLinksBody::Single(item))
+    }
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
