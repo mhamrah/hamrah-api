@@ -17,6 +17,8 @@ pub async fn get_links(
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> AppResult<(StatusCode, HeaderMap, Json<serde_json::Value>)> {
+    worker::console_log!("🔗 [get_links] Handler invoked");
+
     let header_pairs: Vec<(String, String)> = headers
         .iter()
         .filter_map(|(k, v)| {
@@ -26,6 +28,12 @@ pub async fn get_links(
         })
         .collect();
 
+    worker::console_log!("🔗 [get_links] Received headers:");
+    for (k, v) in &header_pairs {
+        worker::console_log!("🔗 [get_links] Header: {} = {}", k, v);
+    }
+
+    worker::console_log!("🔗 [get_links] Authenticating user...");
     let user = handles
         .db
         .run(move |mut db| async move {
@@ -38,9 +46,12 @@ pub async fn get_links(
                     hdrs.insert(name, value);
                 }
             }
+            worker::console_log!("🔗 [get_links] Calling get_current_user_from_request...");
             get_current_user_from_request(&mut db, &hdrs).await
         })
         .await?;
+
+    worker::console_log!("🔗 [get_links] Authenticated user: {}", user.id);
 
     let limit = params
         .get("limit")
@@ -48,11 +59,16 @@ pub async fn get_links(
         .unwrap_or(100)
         .min(500);
 
+    worker::console_log!("🔗 [get_links] Query params: {:?}", params);
+    worker::console_log!("🔗 [get_links] Limit: {}", limit);
+
     // since is an INTEGER timestamp (ms)
     let since: i64 = params
         .get("since")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(0);
+
+    worker::console_log!("🔗 [get_links] Since: {}", since);
 
     #[derive(sqlx::FromRow, Debug)]
     struct DeltaRow {
@@ -81,11 +97,13 @@ pub async fn get_links(
     let since_q: i64 = since;
     let limit_q = limit;
 
+    worker::console_log!("🔗 [get_links] Querying links from DB...");
     // Query 1: Get the links
     let rows = handles
         .db
         .run(move |mut db| async move {
-            query_as::<DeltaRow>(
+            worker::console_log!("🔗 [get_links] Executing SELECT for links...");
+            let result = query_as::<DeltaRow>(
                 r#"
         SELECT
           l.id,
@@ -111,10 +129,16 @@ pub async fn get_links(
             .bind(since_q)
             .bind(limit_q)
             .fetch_all(&mut db.conn)
-            .await
+            .await;
+            match &result {
+                Ok(rows) => worker::console_log!("🔗 [get_links] Fetched {} links", rows.len()),
+                Err(e) => worker::console_log!("🔗 [get_links] Error fetching links: {}", e),
+            }
+            result
         })
         .await
         .map_err(|e| {
+            worker::console_log!("🔗 [get_links] Database error: {}", e);
             AppError::internal(format!("Database error: {}", e))
         })?;
 
@@ -122,6 +146,7 @@ pub async fn get_links(
     let mut tags_map: HashMap<String, Vec<String>> = HashMap::new();
 
     if !rows.is_empty() {
+        worker::console_log!("🔗 [get_links] Querying tags for fetched links...");
         let link_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
         let placeholders = link_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
 
@@ -139,15 +164,25 @@ pub async fn get_links(
         let tag_rows = handles
             .db
             .run(move |mut db| async move {
+                worker::console_log!("🔗 [get_links] Executing SELECT for tags...");
                 let mut q = query_as::<LinkTagRow>(&tag_query);
                 for link_id in link_ids {
                     q = q.bind(link_id);
                 }
                 let result = q.fetch_all(&mut db.conn).await;
+                match &result {
+                    Ok(rows) => {
+                        worker::console_log!("🔗 [get_links] Fetched {} tag rows", rows.len())
+                    }
+                    Err(e) => worker::console_log!("🔗 [get_links] Error fetching tags: {}", e),
+                }
                 result
             })
             .await
-            .map_err(|e| AppError::internal(format!("Database error fetching tags: {}", e)))?;
+            .map_err(|e| {
+                worker::console_log!("🔗 [get_links] Database error fetching tags: {}", e);
+                AppError::internal(format!("Database error fetching tags: {}", e))
+            })?;
 
         // Group tags by link_id
         for tag_row in tag_rows {
@@ -159,6 +194,7 @@ pub async fn get_links(
     }
 
     // Combine links with their tags
+    worker::console_log!("🔗 [get_links] Combining links with tags...");
     let mut out_links = Vec::with_capacity(rows.len());
     for row in &rows {
         let tags = tags_map.get(&row.id).cloned().unwrap_or_default();
@@ -186,6 +222,12 @@ pub async fn get_links(
     } else {
         None
     };
+
+    worker::console_log!(
+        "🔗 [get_links] Returning {} links, next_cursor: {:?}",
+        out_links.len(),
+        next_cursor
+    );
 
     let mut headers = HeaderMap::new();
     headers.insert("Cache-Control", "no-store".parse().unwrap());
