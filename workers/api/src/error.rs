@@ -2,6 +2,18 @@ use axum::http::{header::RETRY_AFTER, HeaderMap, HeaderName, HeaderValue, Status
 
 #[macro_export]
 macro_rules! log_error {
+    // New arm: accept a pre-formatted JSON string and print as-is
+    ($json:expr) => {
+        #[cfg(target_arch = "wasm32")]
+        {
+            worker::console_log!("{}", $json);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            eprintln!("{}", $json);
+        }
+    };
+    // Legacy arm: accept (error, context) and wrap into a JSON envelope
     ($err:expr, $context:expr) => {
         #[cfg(target_arch = "wasm32")]
         {
@@ -216,7 +228,24 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        log_error!(&self.message, &self.code);
+        // Structured error logging with status, code, message, details, and optional stack trace.
+        let details_for_log = self.details.clone();
+        let stack_str = std::backtrace::Backtrace::capture().to_string();
+        let stack_opt = if stack_str.contains("disabled") {
+            None
+        } else {
+            Some(stack_str)
+        };
+        let log_entry = json!({
+            "level": "error",
+            "type": "app_error",
+            "status": self.status.as_u16(),
+            "code": self.code,
+            "message": self.message,
+            "details": details_for_log,
+            "stack": stack_opt
+        });
+        log_error!(log_entry.to_string());
         let headers = self.headers;
         // Compose JSON error body
         let body = json!({
@@ -269,16 +298,52 @@ impl From<worker::Error> for AppError {
 
 impl From<sqlx_d1::Error> for AppError {
     fn from(err: sqlx_d1::Error) -> Self {
-        // Surface constraint violations as conflict; everything else internal.
-        let msg = err.to_string();
-        let lowered = msg.to_ascii_lowercase();
-        if lowered.contains("unique")
-            || lowered.contains("constraint")
-            || lowered.contains("conflict")
-        {
-            AppError::conflict("Constraint violation").with_details(json!({ "reason": msg }))
-        } else {
-            AppError::anyhow(err)
+        // Prefer structured classification when the underlying error is a database error.
+        match &err {
+            sqlx_d1::Error::Database(db_err) => {
+                // Attempt to extract SQLite/D1 error code and constraint name when available.
+                let code = db_err.code().map(|c| c.to_string()); // e.g., "2067" (SQLITE_CONSTRAINT_UNIQUE), "19" (SQLITE_CONSTRAINT)
+                let message = db_err.message().to_string();
+                let constraint = db_err.constraint().map(|c| c.to_string());
+                let lowered = message.to_ascii_lowercase();
+
+                // Known unique/constraint markers:
+                // - Message contains "unique"/"constraint"
+                // - SQLite extended codes: 2067 (SQLITE_CONSTRAINT_UNIQUE), 1555 (SQLITE_CONSTRAINT_PRIMARYKEY)
+                // - Generic SQLite code: 19 (SQLITE_CONSTRAINT)
+                let is_unique =
+                    lowered.contains("unique") || matches!(code.as_deref(), Some("2067" | "1555"));
+                let is_constraint = lowered.contains("constraint") || code.as_deref() == Some("19");
+
+                if is_unique || is_constraint {
+                    return AppError::conflict("Constraint violation").with_details(json!({
+                        "reason": message,
+                        "db_code": code,
+                        "constraint": constraint
+                    }));
+                }
+
+                // For other DB errors, surface as internal but include db_code in details for better logs.
+                AppError::internal("Database error").with_details(json!({
+                    "reason": message,
+                    "db_code": code,
+                    "constraint": constraint
+                }))
+            }
+            _ => {
+                // Fallback: classify by message content when we don't have a database error variant.
+                let msg = err.to_string();
+                let lowered = msg.to_ascii_lowercase();
+                if lowered.contains("unique")
+                    || lowered.contains("constraint")
+                    || lowered.contains("conflict")
+                {
+                    AppError::conflict("Constraint violation")
+                        .with_details(json!({ "reason": msg }))
+                } else {
+                    AppError::anyhow(err)
+                }
+            }
         }
     }
 }

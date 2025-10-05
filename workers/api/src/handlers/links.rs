@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde_json::json;
 use sqlx_d1::{query, query_as};
 use uuid::Uuid;
+use worker::console_log;
 
 /* PostLinkItem moved to handlers::common::types */
 
@@ -73,6 +74,7 @@ pub async fn post_links(
             get_current_user_from_request(&mut db, &hdrs).await
         })
         .await?;
+    console_log!("POST /v1/links: user authenticated user_id={}", user.id);
 
     // Convert body to items array
     let items: Vec<PostLinkItem> = match body {
@@ -84,6 +86,12 @@ pub async fn post_links(
     if items.is_empty() {
         return Err(Box::new(AppError::bad_request("No links provided")));
     }
+
+    console_log!(
+        "POST /v1/links: processing {} item(s) for user_id={}",
+        items.len(),
+        user.id
+    );
 
     let mut results = Vec::new();
     let now_ts = crate::utils::datetime_to_timestamp(Utc::now());
@@ -126,6 +134,15 @@ pub async fn post_links(
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| crate::utils::datetime_to_timestamp(dt.with_timezone(&chrono::Utc)));
 
+        console_log!(
+            "DB upsert link: user_id={} canonical_url={} original_url={} client_id={:?} save_id={}",
+            user_id_q,
+            canonical_q,
+            url_q,
+            client_id_q,
+            save_id
+        );
+
         let link_id: String = handles
                     .db
                     .run(move |mut db| async move {
@@ -139,11 +156,11 @@ pub async fn post_links(
                         INSERT INTO links (
                             id, user_id, client_id, original_url, canonical_url, host,
                             state, save_count, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, 'new', 1, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, ?, ?)
                         ON CONFLICT(user_id, canonical_url) DO UPDATE SET
                             save_count = links.save_count + 1,
                             updated_at = excluded.updated_at,
-                            state = CASE WHEN links.deleted_at IS NOT NULL THEN 'new' ELSE links.state END,
+                            state = CASE WHEN links.deleted_at IS NOT NULL THEN 'active' ELSE links.state END,
                             deleted_at = NULL,
                             client_id = COALESCE(links.client_id, excluded.client_id)
                         "#,
@@ -187,16 +204,25 @@ pub async fn post_links(
 
                         // Commit transaction
                         query("COMMIT").execute(&mut db.conn).await?;
+                        console_log!("DB upsert link: success link_id={} user_id={}", resolved_id, user_id_q);
 
                         Ok::<String, sqlx_d1::Error>(resolved_id)
                     })
                     .await
-                    .map_err(AppError::from)?;
+                    .map_err(|e| {
+                        console_log!("DB upsert link error: user_id={} canonical_url={} reason={}", user.id, canonical_url, e);
+                        AppError::from(e)
+                    })?;
 
         // Trigger background processing immediately (fire-and-forget)
         {
             let link_id2 = link_id.clone();
             let user_id2 = user.id.clone();
+            console_log!(
+                "Pipeline: dispatch trigger for link_id={} user_id={}",
+                link_id2,
+                user_id2
+            );
             let _ = handles
                 .env
                 .run(move |env| async move {
@@ -205,6 +231,11 @@ pub async fn post_links(
                     Ok::<(), ()>(())
                 })
                 .await;
+            console_log!(
+                "Pipeline: dispatched trigger for link_id={} user_id={}",
+                link_id,
+                user.id
+            );
         }
 
         // Minimal response entry
@@ -212,6 +243,11 @@ pub async fn post_links(
             "id": link_id,
             "canonical_url": canonical_url
         }));
+        console_log!(
+            "POST /v1/links: returning id={} canonical_url={}",
+            link_id,
+            canonical_url
+        );
     }
 
     // Always return single-link shape

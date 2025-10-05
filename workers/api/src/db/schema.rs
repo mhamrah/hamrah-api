@@ -124,6 +124,56 @@ pub struct NewWebAuthnChallenge {
 // --- LINKS PIPELINE SCHEMA ---
 //
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LinkState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "archived")]
+    Archived,
+}
+
+impl LinkState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LinkState::Active => "active",
+            LinkState::Archived => "archived",
+        }
+    }
+
+    pub fn all() -> &'static [&'static str] {
+        &["active", "archived"]
+    }
+
+    pub fn from_str_case_insensitive(s: &str) -> Result<Self, String> {
+        match s.to_ascii_lowercase().as_str() {
+            "active" => Ok(LinkState::Active),
+            "archived" => Ok(LinkState::Archived),
+            other => Err(format!(
+                "Invalid link state: '{}'. Allowed: {:?}",
+                other,
+                Self::all()
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for LinkState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl From<LinkState> for String {
+    fn from(s: LinkState) -> Self {
+        s.as_str().to_string()
+    }
+}
+
+/// Validate an incoming state string against allowed values, returning a typed state.
+pub fn validate_link_state<S: AsRef<str>>(s: S) -> Result<LinkState, String> {
+    LinkState::from_str_case_insensitive(s.as_ref())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Link {
     pub id: String,

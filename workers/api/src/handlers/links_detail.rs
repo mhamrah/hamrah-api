@@ -12,6 +12,7 @@ use axum::{
 use chrono::Utc;
 use serde_json::json;
 use sqlx_d1::{query, query_as};
+use worker::console_log;
 
 /// GET /v1/links/{id}
 pub async fn get_link_by_id(
@@ -100,6 +101,11 @@ pub async fn patch_link_by_id(
             get_current_user_from_request(&mut db, &hdrs).await
         })
         .await?;
+    console_log!(
+        "PATCH /v1/links/{}: user authenticated user_id={}",
+        id,
+        user.id
+    );
 
     // Verify the link belongs to the user
     let id_q = id.clone();
@@ -119,6 +125,11 @@ pub async fn patch_link_by_id(
         .map_err(AppError::from)?;
 
     if link_exists.is_none() {
+        console_log!(
+            "PATCH /v1/links/{}: link not found for user_id={}",
+            id,
+            user.id
+        );
         return Err(Box::new(AppError::not_found("Link not found")));
     }
 
@@ -147,8 +158,21 @@ pub async fn patch_link_by_id(
         bindings.push(favicon_url);
     }
     if let Some(state) = req.state {
-        update_fields.push("state = ?");
-        bindings.push(state);
+        match crate::db::schema::validate_link_state(&state) {
+            Ok(valid) => {
+                update_fields.push("state = ?");
+                bindings.push(valid.to_string());
+            }
+            Err(msg) => {
+                console_log!(
+                    "PATCH /v1/links/{}: invalid state provided user_id={} reason={}",
+                    id,
+                    user.id,
+                    msg
+                );
+                return Err(Box::new(AppError::bad_request(msg)));
+            }
+        }
     }
 
     if update_fields.is_empty() {
@@ -160,6 +184,13 @@ pub async fn patch_link_by_id(
     bindings.push(id.clone());
 
     let query_str = format!("UPDATE links SET {} WHERE id = ?", update_fields.join(", "));
+    console_log!(
+        "PATCH /v1/links/{}: executing update (fields={})",
+        id,
+        query_str
+            .replace("UPDATE links SET ", "")
+            .replace(" WHERE id = ?", "")
+    );
 
     let query_str_c = query_str.clone();
     let bindings_c = bindings.clone();
@@ -193,8 +224,22 @@ pub async fn patch_link_by_id(
             .await
         })
         .await
-        .map_err(AppError::from)?;
+        .map_err(|e| {
+            console_log!(
+                "DB update link error: id={} user_id={} reason={}",
+                id,
+                user.id,
+                e
+            );
+            AppError::from(e)
+        })?;
 
+    console_log!(
+        "PATCH /v1/links/{}: success user_id={} updated_at={}",
+        id,
+        user.id,
+        updated_link.updated_at
+    );
     Ok(Json(serde_json::to_value(updated_link).unwrap()))
 }
 
@@ -227,15 +272,25 @@ pub async fn delete_link_by_id(
             get_current_user_from_request(&mut db, &hdrs).await
         })
         .await?;
+    console_log!(
+        "DELETE /v1/links/{}: user authenticated user_id={}",
+        id,
+        user.id
+    );
 
-    // Soft delete: set state to 'deleted'
+    // Soft delete: set state to 'archived'
     let id_q = id.clone();
     let user_id_q = user.id.clone();
+    console_log!(
+        "DELETE /v1/links/{}: soft-deleting link for user_id={}",
+        id,
+        user.id
+    );
     let rows_affected = handles
         .db
         .run(move |mut db| async move {
             let res = query(
-                "UPDATE links SET state = 'deleted', deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
+                "UPDATE links SET state = 'archived', deleted_at = ?, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
             )
             .bind(datetime_to_timestamp(Utc::now()))
             .bind(datetime_to_timestamp(Utc::now()))
@@ -246,13 +301,31 @@ pub async fn delete_link_by_id(
             Ok::<u64, sqlx_d1::Error>(res.rows_affected as u64)
         })
         .await
-        .map_err(AppError::from)?;
+        .map_err(|e| {
+            console_log!(
+                "DB soft delete error: id={} user_id={} reason={}",
+                id,
+                user.id,
+                e
+            );
+            AppError::from(e)
+        })?;
 
     if rows_affected == 0 {
+        console_log!(
+            "DELETE /v1/links/{}: link not found or already deleted for user_id={}",
+            id,
+            user.id
+        );
         return Err(Box::new(AppError::not_found("Link not found")));
     }
 
+    console_log!(
+        "DELETE /v1/links/{}: success user_id={} state=archived",
+        id,
+        user.id
+    );
     Ok(Json(
-        json!({ "success": true, "id": id, "state": "deleted" }),
+        json!({ "success": true, "id": id, "state": "archived" }),
     ))
 }

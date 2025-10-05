@@ -38,6 +38,7 @@ use crate::shared_handles::SharedHandles;
 use axum::{extract::Path, http::HeaderMap};
 use chrono::Utc;
 use sqlx_d1::query;
+use worker::console_log;
 
 pub async fn post_link_refresh(
     axum::extract::Extension(handles): axum::extract::Extension<SharedHandles>,
@@ -53,6 +54,11 @@ pub async fn post_link_refresh(
                 get_current_user_from_request(&mut db, &headers_clone).await
             })
             .await?;
+    console_log!(
+        "POST /v1/links/{}/refresh: user authenticated user_id={}",
+        id,
+        user.id
+    );
 
     let now_ts = crate::utils::datetime_to_timestamp(Utc::now());
 
@@ -73,17 +79,27 @@ pub async fn post_link_refresh(
         .is_some();
 
     if !exists {
+        console_log!(
+            "POST /v1/links/{}/refresh: link not found for user_id={}",
+            id,
+            user.id
+        );
         return Err(Box::new(AppError::not_found("Link not found")));
     }
 
-    // Update link state to pending
+    // Touch link to trigger refresh (no state change)
     let id_q2 = id.clone();
     let user_id_q2 = user.id.clone();
     let now_ts_q = now_ts;
+    console_log!(
+        "POST /v1/links/{}/refresh: updating timestamp user_id={}",
+        id,
+        user.id
+    );
     handles
         .db
         .run(move |mut db| async move {
-            query("UPDATE links SET state = 'pending', updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+            query("UPDATE links SET updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
                 .bind(now_ts_q)
                 .bind(&id_q2)
                 .bind(&user_id_q2)
@@ -91,12 +107,20 @@ pub async fn post_link_refresh(
                 .await
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            console_log!("POST /v1/links/{}/refresh: DB update failed user_id={} reason={}", id, user.id, e);
+            e.to_string()
+        })?;
 
     // Trigger pipeline worker now (fire-and-forget)
     {
         let id2 = id.clone();
         let user_id2 = user.id.clone();
+        console_log!(
+            "POST /v1/links/{}/refresh: dispatching pipeline trigger user_id={}",
+            id,
+            user.id
+        );
         let _ = handles
             .env
             .run(move |env| async move {
@@ -104,6 +128,11 @@ pub async fn post_link_refresh(
                 Ok::<(), ()>(())
             })
             .await;
+        console_log!(
+            "POST /v1/links/{}/refresh: pipeline trigger dispatched user_id={}",
+            id,
+            user.id
+        );
     }
 
     Ok(Json(json!({ "success": true })))
