@@ -260,6 +260,7 @@ pub async fn root() -> &'static str {
 }
 
 pub async fn health_check() -> axum::Json<serde_json::Value> {
+    #[cfg(target_arch = "wasm32")]
     console_log!("this is a healssssth check");
     axum::Json(serde_json::json!({
         "status": "healthy",
