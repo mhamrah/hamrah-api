@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
 
-use axum::{routing::get, Router};
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
+mod attestation;
 mod auth;
 mod db;
 mod links;

@@ -1,5 +1,5 @@
 use crate::auth::require_claims;
-use crate::db::{get_user_by_id, DbPool, User};
+use crate::db::{get_user_by_id, DbPool};
 use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
 
 pub async fn me(State(pool): State<DbPool>, headers: HeaderMap) -> impl IntoResponse {
