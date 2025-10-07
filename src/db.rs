@@ -71,7 +71,9 @@ pub async fn get_user_by_id(pool: &DbPool, id: Uuid) -> anyhow::Result<Option<Us
 pub struct Session {
     pub id: Uuid,
     pub user_id: Uuid,
+    #[allow(dead_code)]
     pub refresh_token: String,
+    #[allow(dead_code)]
     pub created_at: chrono::DateTime<Utc>,
     pub expires_at: chrono::DateTime<Utc>,
 }

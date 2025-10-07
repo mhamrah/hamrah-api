@@ -1,5 +1,5 @@
 use crate::auth::require_claims;
-use crate::db::{get_summary_for_link, DbPool, Summary};
+use crate::db::{get_summary_for_link, DbPool};
 use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
 use uuid::Uuid;
 

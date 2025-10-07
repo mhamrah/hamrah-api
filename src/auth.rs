@@ -34,9 +34,8 @@ fn issue_access_token(user: &User) -> anyhow::Result<String> {
 }
 
 fn validate_token(token: &str) -> bool {
-    let key = match DecodingKey::from_secret(jwt_secret().ok().unwrap_or_default().as_bytes()) {
-        k => k,
-    };
+    let k = DecodingKey::from_secret(jwt_secret().ok().unwrap_or_default().as_bytes());
+    let key = k;
     let validation = Validation::default();
     decode::<Claims>(token, &key, &validation).is_ok()
 }
@@ -45,13 +44,7 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|auth| {
-            if let Some(t) = auth.strip_prefix("Bearer ") {
-                Some(t.to_string())
-            } else {
-                None
-            }
-        })
+        .and_then(|auth| auth.strip_prefix("Bearer ").map(|t| t.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -73,7 +66,7 @@ pub async fn auth_native(
 ) -> impl IntoResponse {
     let user = match upsert_user(&pool, &req.email, req.name.as_deref()).await {
         Ok(u) => u,
-        Err(e) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     let refresh = Uuid::new_v4().to_string();
     let _session = match create_session(&pool, user.id, &refresh, 24 * 30).await {

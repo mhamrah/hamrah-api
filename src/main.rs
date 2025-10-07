@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 
-use axum::{routing::get, Router};
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::info;

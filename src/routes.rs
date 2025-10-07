@@ -4,14 +4,11 @@ use crate::links;
 use crate::summaries;
 use crate::tags;
 use crate::users;
-use axum::extract::State;
 use axum::response::IntoResponse;
-use axum::Json;
 use axum::{
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
 
 pub fn health_routes() -> Router<DbPool> {
     Router::new()
