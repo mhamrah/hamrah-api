@@ -13,12 +13,11 @@ Summary
 
 ## System Architecture
 
-- Rust-based backend API with TypeScript link processing worker for AI tasks
-- API runs on Cloudflare Workers (WASM for Rust) and must compile to WASM
+- Rust-based backend API running natively with Axum and Tokio (no WASM)
 - Framework: Axum (Rust async web framework)
-- Database: SQLite with SQLx for async operations
-- Runtime/Deployment: Cloudflare Workers (WASM for Rust)
-- Workflow Engine: Cloudflare Workflows powering the link pipeline worker (TypeScript)
+- Database: Postgres (Neon) with SQLx for async operations and compile-time checked queries
+- Runtime/Deployment: Cloud Run (containerized native binary)
+- Workflow Engine: Server-side jobs and/or Cloud Run Workflows (future)
 - Auth: JWT access/refresh tokens, session tokens, and WebAuthn passkeys
 - Clients:
   - iOS/macOS apps with offline-first data model and background sync
@@ -28,15 +27,15 @@ Summary
 
 ### Components
 
-1) API Worker (Rust)
+1) API Server (Rust)
 - Endpoint handling (auth, users, tokens, WebAuthn)
-- Data access (SQLx, SQLite)
+- Data access (SQLx, Postgres)
 - JWT/session lifecycle
 - Internal service endpoints for web app and services
 
-2) Link Pipeline Worker (TypeScript)
+2) Link Pipeline (Server-side)
 - Ingests URLs and content
-- Orchestrates AI summarization (Cloudflare AI)
+- Orchestrates AI summarization (AI provider agnostic)
 - Normalizes and persists summaries for offline access
 - Future: classify, tag, cluster content for retrieval
 
@@ -52,15 +51,15 @@ Summary
   - Native integrations (e.g., share extensions, system services, Spotlight/Shortcuts where applicable)
 
 - Web:
-  - Uses the same API, with internal service bindings from hamrah.app to hamrah-api
+  - Uses the same API via internal service bindings or direct Cloud Run ingress
 
 ---
 
-## AI Agents (Cloudflare AI)
+## AI Agents
 
 - URL Summarization Agent
   - Fetches content from URLs
-  - Summarizes via Cloudflare AI
+- Summarizes via AI provider
   - Extracts key insights/metadata (title, authors, topics, entities)
   - Stores summary and metadata for offline access
 
@@ -75,7 +74,7 @@ Summary
   - Leverages embeddings and metadata for semantic retrieval
 
 Privacy & Security
-- AI runs with scoped credentials via Cloudflare Workers
+- AI runs with scoped credentials in the server or Cloud Run jobs
 - No user secrets are embedded in models
 - Only necessary data is passed to the AI provider
 

@@ -1,16 +1,13 @@
 # Rust
-workers/api/target/
-workers/api/build/
+target/
+build/
 
 # Node.js
 node_modules/
-workers/link-pipeline/node_modules/
-workers/link-pipeline/dist/
+node_modules/
 
-# Wrangler
-.wrangler/
-workers/api/.wrangler/
-workers/link-pipeline/.wrangler/
+# Cloudflare Wrangler (removed)
+# .wrangler/
 
 # Logs
 *.log
@@ -27,3 +24,10 @@ npm-debug.log*
 Thumbs.db
 
 target/
+
+# Environment files
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
