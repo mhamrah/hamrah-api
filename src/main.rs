@@ -5,6 +5,7 @@ use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
+mod attestation;
 mod auth;
 mod db;
 mod links;

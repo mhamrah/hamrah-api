@@ -1,3 +1,4 @@
+use crate::attestation;
 use crate::auth;
 use crate::db::DbPool;
 use crate::links;
@@ -17,6 +18,9 @@ pub fn health_routes() -> Router<DbPool> {
         .route("/api/auth/native", post(auth::auth_native))
         .route("/api/auth/tokens/refresh", post(auth::auth_refresh))
         .route("/api/auth/tokens/validate", get(auth::auth_validate))
+        .route("/api/attestation/challenge", post(attestation::challenge))
+        .route("/api/attestation/verify", post(attestation::verify_attestation))
+        .route("/api/attestation/assert", post(attestation::verify_assertion))
         .route("/v1/links", get(links::list_links).post(links::create_link))
         .route("/v1/users/me", get(users::me))
         .route("/v1/tags", get(tags::list_tags))
