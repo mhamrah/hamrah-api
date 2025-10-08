@@ -55,5 +55,9 @@ jobs:
             --cpu 1 \
             --port 8080 \
             --no-cpu-throttling \
+            --startup-probe-type=http \
+            --startup-probe-path=/healthz \
+            --liveness-probe-type=http \
+            --liveness-probe-path=/healthz \
             --set-env-vars "RUST_LOG=info" \
             --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest"
