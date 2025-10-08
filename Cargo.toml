@@ -21,6 +21,8 @@ jsonwebtoken = "9"
 rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
+webauthn-rs-proto = "0.5"
 # Apple App Attestation
 appattest-rs = "0.1.0"
 # Misc

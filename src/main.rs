@@ -13,6 +13,7 @@ mod routes;
 mod summaries;
 mod tags;
 mod users;
+mod webauthn;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -23,9 +24,14 @@ async fn main() -> anyhow::Result<()> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt().with_env_filter(filter).compact().init();
 
+    info!("hamrah-api starting up...");
+
     // Database init
+    info!("connecting to database...");
     let pool = db::init_pool().await?;
+    info!("database connected, running migrations...");
     db::run_migrations(&pool).await?;
+    info!("migrations complete");
 
     // Router
     let app = routes::health_routes()

@@ -31,8 +31,8 @@ WORKDIR /app
 # Install runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Copy binary
-COPY --from=builder /app/target/release/hamrah-server /app/server
+# Copy binary with explicit permissions
+COPY --from=builder --chmod=0755 /app/target/release/hamrah-server /app/server
 
 ENV RUST_LOG=info
 EXPOSE 8080
@@ -41,4 +41,4 @@ EXPOSE 8080
 RUN useradd -m -u 1000 appuser
 USER appuser
 
-ENTRYPOINT ["/app/server"]
+CMD ["/app/server"]
