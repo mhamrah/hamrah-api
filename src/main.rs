@@ -23,31 +23,20 @@ async fn main() -> anyhow::Result<()> {
     // Load .env file if present (ignored in production)
     let _ = dotenvy::dotenv();
 
-    // Logging - use JSON format for Cloud Run, pretty format for local dev
+    // Logging - Cloud Run reads from stdout/stderr
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    // Detect if running in Cloud Run (has K_SERVICE env var)
-    if std::env::var("K_SERVICE").is_ok() {
-        // Cloud Run: use JSON format for proper log parsing
-        fmt()
-            .with_env_filter(filter)
-            .json()
-            .with_target(false)
-            .with_current_span(false)
-            .init();
-    } else {
-        // Local dev: use pretty format
-        fmt()
-            .with_env_filter(filter)
-            .compact()
-            .init();
-    }
+    // Use compact format that works well with Cloud Logging
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .compact()
+        .init();
 
     info!("=================================================");
     info!("🚀 hamrah-api starting up");
     info!("   Version: {}", env!("CARGO_PKG_VERSION"));
-    info!("   Rust: {}", env!("CARGO_PKG_RUST_VERSION").unwrap_or("unknown"));
-    info!("=================================================")
+    info!("=================================================");
 
     // Database init
     info!("📊 Connecting to database...");
