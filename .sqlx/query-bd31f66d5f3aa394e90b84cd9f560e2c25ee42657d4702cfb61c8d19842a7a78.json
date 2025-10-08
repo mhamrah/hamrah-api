@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT DISTINCT t.id, t.name\n           FROM tags t\n           JOIN link_tags lt ON lt.tag_id = t.id\n           JOIN links l ON l.id = lt.link_id\n           WHERE l.user_id = $1\n           ORDER BY t.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "bd31f66d5f3aa394e90b84cd9f560e2c25ee42657d4702cfb61c8d19842a7a78"
+}
