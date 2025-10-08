@@ -100,3 +100,4 @@ Privacy & Security
 
 - Always run `cargo fmt` after saving a file or making a change.
 - Always run `cargo clippy -- -D warnings` to catch lints before committing code.
+- **Axum Route Syntax**: Use `{param}` for path parameters (e.g., `/api/users/{id}`), NOT the old `:param` syntax (e.g., `/api/users/:id`). The newer Axum versions require curly braces.

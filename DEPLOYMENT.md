@@ -142,7 +142,18 @@ gcloud run deploy hamrah-api \
   --memory 512Mi \
   --cpu 1 \
   --port 8080 \
-  --set-env-vars "PORT=8080,RUST_LOG=info" \
+  --no-cpu-throttling \
+  --startup-probe http \
+  --startup-probe-path /healthz \
+  --startup-probe-initial-delay-seconds 10 \
+  --startup-probe-period-seconds 10 \
+  --startup-probe-timeout-seconds 3 \
+  --liveness-probe http \
+  --liveness-probe-path /healthz \
+  --liveness-probe-initial-delay-seconds 30 \
+  --liveness-probe-period-seconds 30 \
+  --liveness-probe-timeout-seconds 3 \
+  --set-env-vars "RUST_LOG=info" \
   --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest"
 ```
 
