@@ -24,15 +24,21 @@ COPY migrations migrations
 # Build release binary
 RUN cargo build --release
 
-# -------- Runtime stage (distroless) --------
-FROM gcr.io/distroless/cc-debian12
+# -------- Runtime stage (debian-slim for debugging) --------
+FROM debian:12-slim
 WORKDIR /app
+
+# Install runtime deps
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy binary
 COPY --from=builder /app/target/release/hamrah-server /app/server
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 ENV RUST_LOG=info
 EXPOSE 8080
-USER nonroot
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser
+USER appuser
+
 ENTRYPOINT ["/app/server"]
