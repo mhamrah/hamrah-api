@@ -19,6 +19,34 @@ See “agents and architecture” for more detail: ./agents.md
 - Foundation for intelligent organization (classification, tagging, clustering) and semantic retrieval
 - Roadmap: reminders, lists, and notes management; surface relevant content on demand
 
+## Authentication
+
+The API supports multiple authentication methods:
+
+- **JWT Tokens**: Standard access/refresh token flow for native apps
+- **WebAuthn Passkeys**: Passwordless authentication using platform authenticators (Face ID, Touch ID, Windows Hello)
+- **Apple App Attestation**: Hardware-backed cryptographic verification for iOS/macOS apps
+
+### WebAuthn (Passkeys)
+
+WebAuthn support enables passwordless authentication across all platforms. The implementation uses the `webauthn-rs` library and supports:
+
+- **Registration**: Create new passkey credentials for authenticated users
+- **Authentication**: Discoverable credential authentication (no username required)
+- **Credential Management**: List, rename, and delete passkeys
+
+**Endpoints:**
+- `POST /api/webauthn/register/begin` - Start passkey registration
+- `POST /api/webauthn/register/verify` - Complete passkey registration
+- `POST /api/webauthn/authenticate/discoverable` - Start discoverable authentication
+- `POST /api/webauthn/authenticate/discoverable/verify` - Complete authentication
+- `GET /api/webauthn/users/:user_id/credentials` - List user's passkeys
+- `DELETE /api/webauthn/credentials/:id` - Delete a passkey
+
+**Configuration:**
+- `WEBAUTHN_RP_ID`: Relying Party ID (e.g., "hamrah.app" or "localhost")
+- `WEBAUTHN_RP_ORIGIN`: Expected origin URL (e.g., "https://hamrah.app")
+
 ## AI Services
 
 - AI for summarization and retrieval augmentation
@@ -47,6 +75,8 @@ Migrations are executed in lexicographical order based on filename. The timestam
 **Current migrations:**
 1. `20250101000000_initial_schema.sql` - Core user and session tables
 2. `20250101000001_links_and_tags.sql` - Link management, tags, and summaries
+3. `20250101000002_app_attestation.sql` - Apple App Attestation support
+4. `20250101000003_webauthn.sql` - WebAuthn passkey credentials and challenges
 
 ### Running Migrations
 

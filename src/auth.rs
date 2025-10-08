@@ -18,7 +18,7 @@ fn jwt_secret() -> anyhow::Result<String> {
     std::env::var("JWT_SECRET").map_err(|_| anyhow::anyhow!("JWT_SECRET must be set"))
 }
 
-fn issue_access_token(user: &User) -> anyhow::Result<String> {
+pub fn issue_access_token(user: &User) -> anyhow::Result<String> {
     let now = Utc::now();
     let iat = now.timestamp() as usize;
     let exp = (now + ChronoDuration::hours(1)).timestamp() as usize;

@@ -33,10 +33,8 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&pool).await?;
     info!("migrations complete");
 
-    // Router
-    let app = routes::health_routes()
-        .with_state(pool)
-        .layer(TraceLayer::new_for_http());
+    // Router with state
+    let app = routes::create_router(pool).layer(TraceLayer::new_for_http());
 
     // Bind address from PORT env or default 8080
     let port: u16 = std::env::var("PORT")

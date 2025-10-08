@@ -4,11 +4,13 @@
 FROM rust:1.90-slim AS builder
 WORKDIR /app
 
-# Install build deps and update CA certificates
+# Install build deps
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && \
-    update-ca-certificates && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
+
+# Set cargo environment variables
+ENV SQLX_OFFLINE=true
 
 # Copy manifest first for caching
 COPY Cargo.toml Cargo.toml
@@ -17,7 +19,6 @@ COPY Cargo.toml Cargo.toml
 RUN mkdir -p src && echo "fn main(){}" > src/main.rs
 
 # Fetch deps
-ENV SQLX_OFFLINE=true
 RUN cargo build --release || true
 
 # Copy real source
