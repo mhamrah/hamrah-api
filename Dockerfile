@@ -4,8 +4,11 @@
 FROM rust:1.90-slim AS builder
 WORKDIR /app
 
-# Install build deps
-RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install build deps and update CA certificates
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates && \
+    update-ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy manifest first for caching
 COPY Cargo.toml Cargo.toml
