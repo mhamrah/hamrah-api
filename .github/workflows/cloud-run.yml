@@ -2,7 +2,7 @@ name: Cloud Run CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -55,5 +55,5 @@ jobs:
             --cpu 1 \
             --port 8080 \
             --no-cpu-throttling \
-            --set-env-vars "PORT=8080,RUST_LOG=info" \
+            --set-env-vars "RUST_LOG=info" \
             --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest"
