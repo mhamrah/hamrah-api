@@ -334,3 +334,4 @@ If you see compile errors about type mismatches:
 
 - Detailed architecture and AI agents: ./agents.md
 - License: ./LICENSE
+
